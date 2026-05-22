@@ -51,7 +51,7 @@ class SourceFileScanServiceTest {
 
         SourceFileScanService service = new SourceFileScanService(
                 registryService,
-                new SourceFileDiscoveryService(".java", ""),
+                new SourceFileDiscoveryService(),
                 hashService,
                 jdbcTemplate
         );

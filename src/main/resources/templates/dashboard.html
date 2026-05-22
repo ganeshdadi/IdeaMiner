@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>IdeaMiner Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 24px; }
+        table { border-collapse: collapse; width: 100%; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    </style>
+</head>
+<body>
+<h2>Repositories</h2>
+<form id="onboardForm">
+    <input type="text" name="repoPath" placeholder="/path/to/repo" style="width:420px;">
+    <button type="submit">Onboard</button>
+</form>
+<pre id="runStatus" style="background:#f7f7f7; padding:8px;"></pre>
+<table>
+    <thead><tr><th>Name</th><th>ID</th><th>Path</th><th>Open</th></tr></thead>
+    <tbody>
+    <tr th:each="repo : ${repos}">
+        <td th:text="${repo.name()}">name</td>
+        <td th:text="${repo.id()}">id</td>
+        <td th:text="${repo.localPath()}">path</td>
+        <td><a th:href="@{/repo(repo=${repo.id()})}">View</a></td>
+    </tr>
+    </tbody>
+</table>
+<script>
+const form = document.getElementById('onboardForm');
+const runStatus = document.getElementById('runStatus');
+
+form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const repoPath = form.repoPath.value;
+  if (!repoPath) return;
+  runStatus.textContent = 'Starting onboarding...';
+  const body = new URLSearchParams({ repoPath });
+  const response = await fetch('/onboard', { method: 'POST', body });
+  const payload = await response.json();
+  runStatus.textContent = 'Run: ' + payload.runId;
+  poll(payload.runId, repoPath);
+});
+
+async function poll(runId, repoPath) {
+  const timer = setInterval(async () => {
+    const response = await fetch('/onboard/status?runId=' + encodeURIComponent(runId));
+    const state = await response.json();
+    runStatus.textContent = JSON.stringify(state, null, 2);
+    if (state.status === 'completed' || state.status === 'failed') {
+      clearInterval(timer);
+      window.location.href = '/repo?repo=' + encodeURIComponent(repoPath);
+    }
+  }, 1500);
+}
+</script>
+</body>
+</html>

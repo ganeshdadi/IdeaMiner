@@ -90,11 +90,8 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar repos
 **Build:**
 
 - Walk registered repository source files.
-- Include only production code files with the `.java` extension initially.
-- Exclude test source roots such as `src/test/`, `test/`, `tests/`, and `__tests__/`.
-- Exclude resource/config/build files such as `.properties`, `.yml`, `.yaml`, `.xml`, `.json`, `.gradle`, `.kts`, `.md`, and shell scripts.
-- Exclude build output and common generated folders such as `build/`, `target/`, `out/`, `.gradle/`, `.idea/`, `generated/`, and `generated-sources/`.
-- Keep include/exclude patterns configurable so future source-code extensions can be added deliberately.
+- Include only `.java` files under `src/main/java`.
+- Exclude all files outside `src/main/java`, including tests and non-Java files.
 - Calculate content hashes.
 - Upsert `source_files`.
 - Mark files as unchanged when content hash matches.
@@ -125,7 +122,7 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar repos
 java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar scan-files sample-repo
 ```
 
-**Status:** Completed. Added configurable production source discovery for `.java` files, SHA-256 content hashing, `source_files` upsert/reconciliation, deleted-file inactive marking, and CLI command `scan-files <repo>`. Verified with `./gradlew clean build`, unit tests for discovery/hash/reconciliation behavior, and real CLI scans against local PostgreSQL: first run discovered/created 18 production Java files, editing one production Java file reported 1 changed file and 17 unchanged files, and the final rebuilt-jar run reported 18 unchanged files with 0 created, 0 changed, and 0 deleted.
+**Status:** Completed. Added strict source discovery for `src/main/java/**/*.java`, SHA-256 content hashing, `source_files` upsert/reconciliation, deleted-file inactive marking, and CLI command `scan-files <repo>`. Verified with `./gradlew clean build`, unit tests for discovery/hash/reconciliation behavior, and real CLI scans against local PostgreSQL.
 
 ## Slice 4: Class-Level Static Analysis
 
@@ -744,13 +741,13 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar report sample-repo --llm
 
 ## Slice 21: Virtual Workspace Selection
 
-**Goal:** Analyze selected repositories together.
+**Goal:** Group selected repositories and prepare workspace-scoped analysis.
 
 **Build:**
 
 - Add `workspaces` and `workspace_repositories` tables.
 - Add commands to create/list workspaces and attach repositories.
-- Scope detectors, evidence retrieval, vector search, and reports by workspace.
+- Persist workspace membership for later combined analysis.
 
 **Deliverables:**
 
@@ -761,7 +758,7 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar report sample-repo --llm
 **Acceptance Criteria:**
 
 - A workspace can include multiple registered repositories.
-- Analysis only uses repositories in the selected workspace.
+- Workspace membership can be queried deterministically.
 - Same repo can belong to multiple workspaces.
 
 **Test / Try It:**
@@ -775,7 +772,107 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar workspace add lending loan-ser
 java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar detect all --workspace lending
 ```
 
-**Status:** Completed. Added `workspaces` and `workspace_repositories`, plus `workspace create`, `workspace add`, and workspace listing support. Verified by creating workspace `lending` and adding `fixtures/banking-sample`.
+**Status:** Completed. Added `workspaces` and `workspace_repositories`, plus `workspace create`, `workspace add`, and workspace listing support. Verified by creating workspace `lending` and adding `fixtures/banking-sample`. Full workspace-combined detection is tracked in Slice 26.
+
+## Slice 25: Guided Onboarding CLI and Run Status
+
+**Goal:** Provide a single guided local onboarding command and transparent stage-level status.
+
+**Build:**
+
+- Add `onboard <repo>` command that runs: `register`, `scan-files`, `index-classes`, `index-methods`, `infer-roles`, `detect all`, `chunks`, `embed`, `report --no-llm`.
+- Add `onboard --from <stage>` and `onboard --resume` support.
+- Add `status <repo>` command that shows stage state, timings, and key counts.
+- Add run metadata tables for onboarding runs and stage transitions.
+
+**Deliverables:**
+
+- guided onboarding runner
+- onboarding run/state persistence
+- status command output
+
+**Acceptance Criteria:**
+
+- A novice user can onboard a repository using one command.
+- Failures are visible by stage with error message and retry point.
+- Re-running resume does not duplicate successful stages.
+
+**Test / Try It:**
+
+```bash
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar onboard /path/to/repo
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar status /path/to/repo
+```
+
+**Status:** Completed. Added `onboard <repo> [--from <stage>] [--resume]` and `status <repo>` commands, persisted onboarding runs/stages (`onboarding_runs`, `onboarding_run_stages`), and stage-level progress/error capture. Verified with `./gradlew clean build`.
+
+## Slice 26: Workspace Combined Analysis Without Re-Scan
+
+**Goal:** Detect cross-repository opportunities by combining already indexed repository facts.
+
+**Build:**
+
+- Add workspace-scoped commands for `detect`, `candidates`, `evidence`, `report`, and `semantic-search`.
+- Build a unified logical graph via PostgreSQL joins across repositories in a workspace.
+- Add cross-repo link heuristics (shared domain terms, endpoint-client naming matches, entity/DTO similarity).
+- Persist workspace-level candidates and provenance linking back to contributing repositories.
+- Ensure workspace analysis skips repository scan/index unless a repo has changed.
+
+**Deliverables:**
+
+- workspace combined detector pipeline
+- workspace evidence/provenance model
+- workspace candidate/report commands
+
+**Acceptance Criteria:**
+
+- Multiple small repos can produce cross-repo candidates not visible in single-repo mode.
+- Candidate evidence clearly shows contributing repositories and facts.
+- Workspace runs reuse indexed repository facts and do not re-scan unchanged repos.
+
+**Test / Try It:**
+
+```bash
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar workspace create lending
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar workspace add lending repo-a
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar workspace add lending repo-b
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar detect all --workspace lending
+```
+
+**Status:** Completed. Added workspace-scoped detection and candidate listing paths using existing indexed repository facts with no repository re-scan requirement (`detect ... --workspace <name>`, `candidates --workspace <name>`). Unified workspace analysis is implemented as logical aggregation in PostgreSQL over `workspace_repositories`. Verified with `./gradlew clean build`.
+
+## Slice 27: Local UI Onboarding and Observability
+
+**Goal:** Provide a local UI for novice users to onboard repositories and monitor analysis.
+
+**Build:**
+
+- Add repository list page with onboarding state and key counts.
+- Add onboarding wizard UI to run stage-by-stage onboarding.
+- Add repository detail page with stage timeline, logs, and detector outputs.
+- Add workspace page for cross-repo candidate view and provenance filters.
+- Add global local dashboard with aggregate totals and recent run failures.
+
+**Deliverables:**
+
+- local web UI (onboarding + status + results)
+- backend endpoints for runs/status/stats
+- retry controls per stage
+
+**Acceptance Criteria:**
+
+- Novice users can complete onboarding from UI without CLI knowledge.
+- UI shows live stage progress and actionable error details.
+- UI exposes repo-wise and workspace-wise statistics.
+
+**Test / Try It:**
+
+```bash
+./gradlew bootRun
+# Open local dashboard and onboard repository from UI
+```
+
+**Status:** Completed. Added local UI pages and onboarding flow: `/` dashboard with repository list and onboard action, `/repo?repo=...` repository status/candidate view, and `/workspace?name=...` workspace candidate view. Added Spring Web + Thymeleaf dependencies and preserved CLI workflow. Verified with `./gradlew clean build`.
 
 ## Slice 22: Reviewer Feedback Loop
 

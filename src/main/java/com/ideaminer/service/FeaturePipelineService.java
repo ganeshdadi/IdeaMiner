@@ -310,6 +310,89 @@ public class FeaturePipelineService {
                 rs.getString("term") + " weight=" + rs.getInt("weight"), repository.id(), term);
     }
 
+    public List<String> inferRoles(String repositoryIdentifier) {
+        RepositoryRegistration repository = queryService.repository(repositoryIdentifier);
+        int upserts = 0;
+        List<Map<String, Object>> classes = jdbcTemplate.queryForList("""
+                SELECT id, class_name, package_name, class_type, annotations
+                FROM classes
+                WHERE repository_id = ?
+                """, repository.id());
+        for (Map<String, Object> row : classes) {
+            String classId = (String) row.get("id");
+            String className = String.valueOf(row.get("class_name"));
+            String packageName = String.valueOf(row.get("package_name"));
+            String classType = String.valueOf(row.get("class_type"));
+            String role = inferClassRole(className, packageName, classType);
+            if (role != null) {
+                upserts += upsertRole(repository.id(), classId, null, role, 0.70, "heuristic",
+                        List.of("class_name:" + className, "class_type:" + classType));
+            }
+        }
+
+        List<Map<String, Object>> methods = jdbcTemplate.queryForList("""
+                SELECT m.id, m.class_id, m.method_name, m.signature, c.class_name
+                FROM methods m
+                JOIN classes c ON c.id = m.class_id
+                WHERE m.repository_id = ?
+                """, repository.id());
+        for (Map<String, Object> row : methods) {
+            String methodId = (String) row.get("id");
+            String classId = (String) row.get("class_id");
+            String methodName = String.valueOf(row.get("method_name"));
+            String className = String.valueOf(row.get("class_name"));
+            String role = inferMethodRole(className, methodName);
+            if (role != null) {
+                upserts += upsertRole(repository.id(), classId, methodId, role, 0.60, "heuristic",
+                        List.of("class_name:" + className, "method_name:" + methodName));
+            }
+        }
+        return List.of("Role inferences upserted: " + upserts);
+    }
+
+    public List<String> listRoles(String repositoryIdentifier) {
+        RepositoryRegistration repository = queryService.repository(repositoryIdentifier);
+        return jdbcTemplate.query("""
+                SELECT role, confidence, source, COALESCE(c.class_name, '') AS class_name, COALESCE(m.method_name, '') AS method_name
+                FROM role_inference r
+                LEFT JOIN classes c ON c.id = r.class_id
+                LEFT JOIN methods m ON m.id = r.method_id
+                WHERE r.repository_id = ?
+                ORDER BY confidence DESC, role, class_name, method_name
+                """, (rs, rowNum) -> rs.getString("role") + " | " + rs.getBigDecimal("confidence") + " | " +
+                rs.getString("source") + " | " + rs.getString("class_name") +
+                (rs.getString("method_name").isBlank() ? "" : "#" + rs.getString("method_name")), repository.id());
+    }
+
+    private int upsertRole(String repositoryId, String classId, String methodId, String role, double confidence, String source, List<String> signals) {
+        String id = StableId.of("role_", repositoryId + ":" + role + ":" + (classId == null ? "" : classId) + ":" + (methodId == null ? "" : methodId));
+        return jdbcTemplate.update("""
+                INSERT INTO role_inference (id, repository_id, class_id, method_id, role, confidence, source, signals, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?::jsonb, now())
+                ON CONFLICT (id) DO UPDATE SET
+                    confidence = EXCLUDED.confidence,
+                    source = EXCLUDED.source,
+                    signals = EXCLUDED.signals,
+                    updated_at = now()
+                """, id, repositoryId, classId, methodId, role, confidence, source, JsonSupport.array(signals));
+    }
+
+    private String inferClassRole(String className, String packageName, String classType) {
+        String lower = (className + " " + packageName + " " + classType).toLowerCase(Locale.ROOT);
+        if (lower.contains("controller") || lower.contains("resource") || lower.contains("endpoint") || lower.contains("handler")) return "controller";
+        if (lower.contains("service") || lower.contains("manager")) return "service";
+        if (lower.contains("repository") || lower.contains("dao")) return "repository";
+        return null;
+    }
+
+    private String inferMethodRole(String className, String methodName) {
+        String lower = (className + "#" + methodName).toLowerCase(Locale.ROOT);
+        if (lower.contains("find") || lower.contains("get") || lower.contains("query")) return "read-path";
+        if (lower.contains("save") || lower.contains("update") || lower.contains("delete") || lower.contains("create")) return "write-path";
+        if (lower.contains("review") || lower.contains("approve") || lower.contains("eligib")) return "decision-path";
+        return null;
+    }
+
     public List<String> detect(String detector, String repositoryIdentifier) {
         extractDomainTerms(repositoryIdentifier);
         buildGraph(repositoryIdentifier);
@@ -327,6 +410,39 @@ public class FeaturePipelineService {
             case "manual-review" -> detectManualReview(repository);
             default -> List.of("Unknown detector: " + detector);
         };
+    }
+
+    public List<String> detectWorkspace(String detector, String workspaceName) {
+        List<String> repositoryIds = workspaceRepositoryIds(workspaceName);
+        List<String> output = new ArrayList<>();
+        for (String repositoryId : repositoryIds) {
+            output.add("[Workspace " + workspaceName + "] repo=" + repositoryId);
+            output.addAll(detect(detector, repositoryId));
+        }
+        return output;
+    }
+
+    public List<String> workspaceCandidates(String workspaceName) {
+        List<String> repositoryIds = workspaceRepositoryIds(workspaceName);
+        if (repositoryIds.isEmpty()) {
+            return List.of();
+        }
+        String placeholders = repositoryIds.stream().map(value -> "?").collect(Collectors.joining(","));
+        String sql = """
+                SELECT c.id, c.repository_id, c.detector, c.title, c.score,
+                       COALESCE((SELECT state FROM review_feedback rf WHERE rf.candidate_id = c.id ORDER BY created_at DESC LIMIT 1), c.status) AS state
+                FROM opportunity_candidates c
+                WHERE c.repository_id IN (%s)
+                ORDER BY c.score DESC, c.created_at DESC
+                """.formatted(placeholders);
+        return jdbcTemplate.query(sql, (rs, rowNum) -> rs.getString("id") + " | " + rs.getString("repository_id") + " | " +
+                rs.getString("detector") + " | " + rs.getString("state") + " | score=" + rs.getBigDecimal("score") +
+                " | " + rs.getString("title"), repositoryIds.toArray());
+    }
+
+    private List<String> workspaceRepositoryIds(String workspaceName) {
+        String id = workspaceId(workspaceName);
+        return jdbcTemplate.queryForList("SELECT repository_id FROM workspace_repositories WHERE workspace_id = ?", String.class, id);
     }
 
     public List<String> candidates(String repositoryIdentifier) {

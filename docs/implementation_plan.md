@@ -38,6 +38,8 @@ flowchart TD
     L --> G
 ```
 
+Repository onboarding and indexing are repository-scoped. Workspace analysis is a logical aggregation over already indexed repositories and must not require re-scanning unchanged repositories.
+
 ## 2. Recommended Technology Stack
 
 ### Initial Implementation
@@ -336,7 +338,7 @@ Chunk at method or logical-block level. Whole-class chunks are allowed only as s
 The ingestion pipeline should:
 
 1. Resolve repository identity from the local filesystem path.
-2. Walk source files using a production-code-only include/exclude policy.
+2. Walk source files using a strict `src/main/java/**/*.java` policy.
 3. Calculate content hashes.
 4. Skip unchanged files.
 5. Parse changed files.
@@ -350,7 +352,7 @@ The ingestion pipeline must not call the reasoning LLM. It should produce facts 
 
 Repository inputs are local filesystem directories. Git metadata such as branch, remote URL, and commit SHA should be captured only when available; it must not be required for registration or indexing.
 
-Initial indexing scope should include only production `.java` files. Exclude tests, resources, build scripts, generated output, and configuration files. Examples of excluded paths and files include `src/test/`, `test/`, `tests/`, `build/`, `target/`, `out/`, `.gradle/`, `.idea/`, `generated/`, `generated-sources/`, `.properties`, `.yml`, `.yaml`, `.xml`, `.json`, `.gradle`, `.kts`, `.md`, and shell scripts. Keep this policy configurable so future source-code extensions can be added deliberately.
+Initial indexing scope should include only `.java` files under `src/main/java`. Files outside this path, including tests and non-Java artifacts, are ignored for indexing.
 
 ## 6. Static Analysis Engine
 
@@ -385,6 +387,8 @@ The graph should answer questions like:
 - Which classes form the full path from customer action to final status?
 
 Use relational edge tables first. Add a dedicated graph database only if query complexity justifies it.
+
+For workspace analysis, build a unified logical graph in PostgreSQL by querying repository-scoped facts and edges across all repositories attached to a workspace. Do not require a separate graph database for this stage.
 
 ## 8. Search and Vector Retrieval
 
@@ -618,6 +622,12 @@ Use feedback to:
 
 - approved LLM provider configuration
 - validate one candidate at a time
+
+### Phase 5: Local UX and Multi-Repo Workflow
+
+- guided onboarding command and stage-level run tracking
+- workspace-level combined detection without re-scanning unchanged repositories
+- local UI for onboarding, progress visibility, run diagnostics, and repository/workspace statistics
 - structured LLM JSON output
 - evidence-backed Markdown report rendering
 

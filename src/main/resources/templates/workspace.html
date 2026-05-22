@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="UTF-8"><title>Workspace</title></head>
+<body style="font-family: Arial, sans-serif; margin: 24px;">
+<a href="/">Home</a>
+<h2 th:text="'Workspace: ' + ${name}">Workspace</h2>
+<h3>Candidates</h3>
+<ul>
+    <li th:each="c : ${candidates}" th:text="${c}">candidate</li>
+</ul>
+<h3>Known Workspaces</h3>
+<ul>
+    <li th:each="w : ${workspaces}" th:text="${w}">workspace</li>
+</ul>
+</body>
+</html>

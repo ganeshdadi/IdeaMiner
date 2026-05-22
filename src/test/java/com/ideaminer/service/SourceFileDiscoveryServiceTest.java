@@ -17,41 +17,39 @@ class SourceFileDiscoveryServiceTest {
     void discoversOnlyProductionJavaFiles() throws Exception {
         write("src/main/java/com/example/OrderService.java", "class OrderService {}\n");
         write("src/main/java/com/example/Order.java", "class Order {}\n");
+        write("src/main/java/com/example/config/AlsoIncluded.java", "class AlsoIncluded {}\n");
         write("src/test/java/com/example/OrderServiceTest.java", "class OrderServiceTest {}\n");
         write("test/Fixture.java", "class Fixture {}\n");
         write("tests/Fixture.java", "class Fixture {}\n");
         write("__tests__/Fixture.java", "class Fixture {}\n");
+        write("src/integration/java/com/example/NotIncluded.java", "class NotIncluded {}\n");
+        write("src/main/kotlin/com/example/OrderService.kt", "class OrderService\n");
         write("src/main/resources/application.properties", "name=value\n");
         write("build/generated/Generated.java", "class Generated {}\n");
-        write("target/generated-sources/Generated.java", "class Generated {}\n");
-        write(".gradle/cache/Ignored.java", "class Ignored {}\n");
         write("build.gradle", "plugins {}\n");
         write("README.md", "# Sample\n");
 
-        SourceFileDiscoveryService service = new SourceFileDiscoveryService(".java", "");
+        SourceFileDiscoveryService service = new SourceFileDiscoveryService();
 
         assertThat(service.discover(repositoryRoot))
                 .extracting(file -> file.relativePath())
                 .containsExactly(
                         "src/main/java/com/example/Order.java",
-                        "src/main/java/com/example/OrderService.java"
+                        "src/main/java/com/example/OrderService.java",
+                        "src/main/java/com/example/config/AlsoIncluded.java"
                 );
     }
 
     @Test
-    void supportsConfiguredExtensionsAndExcludedSegments() throws Exception {
+    void excludesJavaOutsideSrcMainJava() throws Exception {
         write("src/main/java/com/example/OrderService.java", "class OrderService {}\n");
-        write("src/main/kotlin/com/example/OrderService.kt", "class OrderService\n");
-        write("skip/com/example/Ignored.kt", "class Ignored\n");
-
-        SourceFileDiscoveryService service = new SourceFileDiscoveryService(".java,.kt", "skip");
+        write("src/legacy/java/com/example/Legacy.java", "class Legacy {}\n");
+        write("generated-sources/com/example/Generated.java", "class Generated {}\n");
+        SourceFileDiscoveryService service = new SourceFileDiscoveryService();
 
         assertThat(service.discover(repositoryRoot))
                 .extracting(file -> file.relativePath())
-                .containsExactly(
-                        "src/main/java/com/example/OrderService.java",
-                        "src/main/kotlin/com/example/OrderService.kt"
-                );
+                .containsExactly("src/main/java/com/example/OrderService.java");
     }
 
     private void write(String relativePath, String content) throws Exception {

@@ -6,6 +6,7 @@ import com.ideaminer.service.HealthService;
 import com.ideaminer.service.AnalysisService;
 import com.ideaminer.service.IngestionService;
 import com.ideaminer.service.MethodIndexService;
+import com.ideaminer.service.OnboardingService;
 import com.ideaminer.service.RepositoryRegistryService;
 import com.ideaminer.service.SourceFileScanService;
 import org.springframework.beans.factory.ObjectProvider;
@@ -15,7 +16,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Bean;
 
 import java.nio.file.Path;
-import java.util.Scanner;
 
 @SpringBootApplication
 public class IdeaMinerApplication {
@@ -30,6 +30,7 @@ public class IdeaMinerApplication {
                                  SourceFileScanService sourceFileScanService,
                                  ClassIndexService classIndexService,
                                  MethodIndexService methodIndexService,
+                                 OnboardingService onboardingService,
                                  FeaturePipelineService featurePipelineService,
                                  ObjectProvider<IngestionService> ingestionServiceProvider,
                                  ObjectProvider<AnalysisService> analysisServiceProvider) {
@@ -169,15 +170,38 @@ public class IdeaMinerApplication {
                     }
                     featurePipelineService.extractDomainTerms(args[1]).forEach(System.out::println);
                     featurePipelineService.searchDomain(args[1], args[2]).forEach(System.out::println);
+                } else if ("infer-roles".equalsIgnoreCase(command)) {
+                    requireRepo(args);
+                    featurePipelineService.inferRoles(args[1]).forEach(System.out::println);
+                } else if ("roles".equalsIgnoreCase(command)) {
+                    requireRepo(args);
+                    featurePipelineService.listRoles(args[1]).forEach(System.out::println);
                 } else if ("detect".equalsIgnoreCase(command)) {
                     if (args.length < 3) {
                         System.out.println("Usage: detect <rule-heavy|batch-realtime|manual-review|all> <repo>");
                         return;
                     }
-                    featurePipelineService.detect(args[1], args[2]).forEach(System.out::println);
+                    String workspace = optionValue(args, "--workspace");
+                    if (workspace != null) {
+                        featurePipelineService.detectWorkspace(args[1], workspace).forEach(System.out::println);
+                    } else {
+                        featurePipelineService.detect(args[1], args[2]).forEach(System.out::println);
+                    }
                 } else if ("candidates".equalsIgnoreCase(command)) {
+                    String workspace = optionValue(args, "--workspace");
+                    if (workspace != null) {
+                        featurePipelineService.workspaceCandidates(workspace).forEach(System.out::println);
+                    } else {
+                        requireRepo(args);
+                        featurePipelineService.candidates(args[1]).forEach(System.out::println);
+                    }
+                } else if ("onboard".equalsIgnoreCase(command)) {
                     requireRepo(args);
-                    featurePipelineService.candidates(args[1]).forEach(System.out::println);
+                    onboardingService.onboard(args[1], optionValue(args, "--from"), hasOption(args, "--resume"))
+                            .forEach(System.out::println);
+                } else if ("status".equalsIgnoreCase(command)) {
+                    requireRepo(args);
+                    System.out.println(onboardingService.status(args[1]));
                 } else if ("evidence".equalsIgnoreCase(command)) {
                     if (args.length < 2) {
                         System.out.println("Missing candidate id.");
@@ -248,26 +272,9 @@ public class IdeaMinerApplication {
                     printUsage();
                 }
             } else {
-                interactiveMode();
+                printUsage();
             }
         };
-    }
-
-    private void interactiveMode() {
-        System.out.println("Starting in interactive mode. Type 'help' for commands.");
-        Scanner scanner = new Scanner(System.in);
-        while (true) {
-            System.out.print("ideaminer> ");
-            String input = scanner.nextLine().trim();
-            if ("exit".equalsIgnoreCase(input) || "quit".equalsIgnoreCase(input)) {
-                break;
-            }
-            if ("help".equalsIgnoreCase(input)) {
-                printUsage();
-            } else {
-                System.out.println("To be implemented: " + input);
-            }
-        }
     }
 
     private void printUsage() {
@@ -285,8 +292,12 @@ public class IdeaMinerApplication {
         System.out.println("  java -jar ideaminer.jar db-access <repo>");
         System.out.println("  java -jar ideaminer.jar graph <repo> [--from endpoint:/path]");
         System.out.println("  java -jar ideaminer.jar search-domain <repo> <term>");
+        System.out.println("  java -jar ideaminer.jar infer-roles <repo>");
+        System.out.println("  java -jar ideaminer.jar roles <repo>");
         System.out.println("  java -jar ideaminer.jar detect <detector|all> <repo>");
+        System.out.println("  java -jar ideaminer.jar detect <detector|all> <repo> --workspace <name>");
         System.out.println("  java -jar ideaminer.jar candidates <repo>");
+        System.out.println("  java -jar ideaminer.jar candidates --workspace <name>");
         System.out.println("  java -jar ideaminer.jar evidence <candidate-id> [--semantic] [--prompt-safe]");
         System.out.println("  java -jar ideaminer.jar report <repo> [--no-llm|--llm]");
         System.out.println("  java -jar ideaminer.jar chunks <repo>");
@@ -295,6 +306,8 @@ public class IdeaMinerApplication {
         System.out.println("  java -jar ideaminer.jar validate <candidate-id>");
         System.out.println("  java -jar ideaminer.jar workspace create <name>");
         System.out.println("  java -jar ideaminer.jar workspace add <name> <repo>");
+        System.out.println("  java -jar ideaminer.jar onboard <repo-path-or-id> [--from <stage>] [--resume]");
+        System.out.println("  java -jar ideaminer.jar status <repo-path-or-id>");
         System.out.println("  java -jar ideaminer.jar feedback <candidate-id> <state> [--notes text]");
         System.out.println("  java -jar ideaminer.jar index <path/to/repo>   # Index a repository");
         System.out.println("  java -jar ideaminer.jar analyze                # Run analysis over indexed repos");

@@ -1,7 +1,6 @@
 package com.ideaminer.service;
 
 import com.ideaminer.model.DiscoveredSourceFile;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -9,36 +8,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Set;
 import java.util.stream.Stream;
 
 @Service
 public class SourceFileDiscoveryService {
 
-    private static final Set<String> DEFAULT_EXCLUDED_SEGMENTS = Set.of(
-            ".git",
-            ".gradle",
-            ".idea",
-            ".ideaminer",
-            "build",
-            "target",
-            "out",
-            "generated",
-            "generated-sources",
-            "__tests__",
-            "test",
-            "tests"
-    );
-
-    private final Set<String> includedExtensions;
-    private final Set<String> excludedPathSegments;
-
-    public SourceFileDiscoveryService(
-            @Value("${ideaminer.scan.include-extensions:.java}") String includedExtensions,
-            @Value("${ideaminer.scan.exclude-segments:}") String excludedPathSegments) {
-        this.includedExtensions = parseCsv(includedExtensions);
-        Set<String> configuredSegments = parseCsv(excludedPathSegments);
-        this.excludedPathSegments = configuredSegments.isEmpty() ? DEFAULT_EXCLUDED_SEGMENTS : configuredSegments;
+    public SourceFileDiscoveryService() {
     }
 
     public List<DiscoveredSourceFile> discover(Path repositoryRoot) {
@@ -64,17 +39,11 @@ public class SourceFileDiscoveryService {
     }
 
     private boolean isIncluded(Path root, Path path) {
-        Path relativePath = root.relativize(path);
-        if (!includedExtensions.contains(extension(path))) {
+        String normalized = normalizeRelativePath(root.relativize(path));
+        if (!normalized.endsWith(".java")) {
             return false;
         }
-        for (Path segment : relativePath) {
-            String normalizedSegment = segment.toString();
-            if (excludedPathSegments.contains(normalizedSegment)) {
-                return false;
-            }
-        }
-        return true;
+        return normalized.startsWith("src/main/java/");
     }
 
     private String extension(Path path) {
@@ -89,16 +58,6 @@ public class SourceFileDiscoveryService {
             case ".kt", ".kts" -> "kotlin";
             default -> extension(path).replace(".", "");
         };
-    }
-
-    private Set<String> parseCsv(String csv) {
-        if (csv == null || csv.isBlank()) {
-            return Set.of();
-        }
-        return Stream.of(csv.split(","))
-                .map(String::trim)
-                .filter(value -> !value.isBlank())
-                .collect(java.util.stream.Collectors.toUnmodifiableSet());
     }
 
     private String normalizeRelativePath(Path path) {
