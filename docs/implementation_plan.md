@@ -626,10 +626,16 @@ Use feedback to:
 ### Phase 5: Local UX and Multi-Repo Workflow
 
 - guided onboarding command and stage-level run tracking
+- asynchronous onboarding job runner with live progress polling
 - workspace-level combined detection without re-scanning unchanged repositories
 - local UI for onboarding, progress visibility, run diagnostics, and repository/workspace statistics
-- structured LLM JSON output
-- evidence-backed Markdown report rendering
+- separate asynchronous LLM enrichment jobs:
+  - validate candidates
+  - generate LLM report
+- repository trial lifecycle controls:
+  - delete indexed data for a repository while keeping registration
+  - hard-delete repository registration and all derived analysis data
+- structured LLM JSON output and evidence-backed Markdown report rendering
 
 ### Phase 5: Workflow Intelligence
 

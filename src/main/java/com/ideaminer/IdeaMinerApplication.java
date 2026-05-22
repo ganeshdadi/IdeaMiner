@@ -8,6 +8,7 @@ import com.ideaminer.service.IngestionService;
 import com.ideaminer.service.MethodIndexService;
 import com.ideaminer.service.OnboardingService;
 import com.ideaminer.service.RepositoryRegistryService;
+import com.ideaminer.service.RepositoryCleanupService;
 import com.ideaminer.service.SourceFileScanService;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.CommandLineRunner;
@@ -31,6 +32,7 @@ public class IdeaMinerApplication {
                                  ClassIndexService classIndexService,
                                  MethodIndexService methodIndexService,
                                  OnboardingService onboardingService,
+                                 RepositoryCleanupService repositoryCleanupService,
                                  FeaturePipelineService featurePipelineService,
                                  ObjectProvider<IngestionService> ingestionServiceProvider,
                                  ObjectProvider<AnalysisService> analysisServiceProvider) {
@@ -202,6 +204,12 @@ public class IdeaMinerApplication {
                 } else if ("status".equalsIgnoreCase(command)) {
                     requireRepo(args);
                     System.out.println(onboardingService.status(args[1]));
+                } else if ("cleanup".equalsIgnoreCase(command)) {
+                    requireRepo(args);
+                    System.out.println(repositoryCleanupService.cleanup(args[1]));
+                } else if ("delete-repo".equalsIgnoreCase(command)) {
+                    requireRepo(args);
+                    System.out.println(repositoryCleanupService.hardDelete(args[1]));
                 } else if ("evidence".equalsIgnoreCase(command)) {
                     if (args.length < 2) {
                         System.out.println("Missing candidate id.");
@@ -308,6 +316,8 @@ public class IdeaMinerApplication {
         System.out.println("  java -jar ideaminer.jar workspace add <name> <repo>");
         System.out.println("  java -jar ideaminer.jar onboard <repo-path-or-id> [--from <stage>] [--resume]");
         System.out.println("  java -jar ideaminer.jar status <repo-path-or-id>");
+        System.out.println("  java -jar ideaminer.jar cleanup <repo-path-or-id>      # Delete indexed data, keep repository registration");
+        System.out.println("  java -jar ideaminer.jar delete-repo <repo-path-or-id>  # Delete indexed data and repository registration");
         System.out.println("  java -jar ideaminer.jar feedback <candidate-id> <state> [--notes text]");
         System.out.println("  java -jar ideaminer.jar index <path/to/repo>   # Index a repository");
         System.out.println("  java -jar ideaminer.jar analyze                # Run analysis over indexed repos");

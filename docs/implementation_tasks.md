@@ -805,6 +805,7 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar status /path/to/repo
 ```
 
 **Status:** Completed. Added `onboard <repo> [--from <stage>] [--resume]` and `status <repo>` commands, persisted onboarding runs/stages (`onboarding_runs`, `onboarding_run_stages`), and stage-level progress/error capture. Verified with `./gradlew clean build`.
+Added async execution support with immediate `runId` return and live run polling via `/onboard/status?runId=...`, so UI onboarding does not block request threads.
 
 ## Slice 26: Workspace Combined Analysis Without Re-Scan
 
@@ -872,7 +873,80 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar detect all --workspace lending
 # Open local dashboard and onboard repository from UI
 ```
 
-**Status:** Completed. Added local UI pages and onboarding flow: `/` dashboard with repository list and onboard action, `/repo?repo=...` repository status/candidate view, and `/workspace?name=...` workspace candidate view. Added Spring Web + Thymeleaf dependencies and preserved CLI workflow. Verified with `./gradlew clean build`.
+**Status:** Completed. Added local UI pages and onboarding flow: `/` dashboard with repository list and async onboard action, `/repo?repo=...` repository status/candidate view, and `/workspace?name=...` workspace candidate view. Added Spring Web + Thymeleaf dependencies and preserved CLI workflow. UI onboarding now starts asynchronous jobs and polls live status. Verified with `./gradlew clean build`.
+
+## Slice 28: Separate Async LLM Enrichment Jobs in UI
+
+**Goal:** Keep LLM stages independent from deterministic onboarding and runnable on demand from UI.
+
+**Build:**
+
+- Add distinct async LLM jobs:
+  - `validate-candidates` (per-candidate validation for a repository)
+  - `llm-report` (LLM-enhanced report generation for a repository)
+- Add persistent run tracking for LLM jobs and stages.
+- Add UI controls on repository page to trigger each job independently.
+- Add live polling endpoint for LLM job status.
+
+**Deliverables:**
+
+- `llm_runs` and `llm_run_stages` schema
+- async LLM enrichment service
+- UI buttons and polling for each LLM job
+
+**Acceptance Criteria:**
+
+- Users can run validation without generating an LLM report.
+- Users can generate an LLM report without re-running deterministic onboarding.
+- LLM job progress and failures are visible in UI.
+
+**Test / Try It:**
+
+```bash
+./gradlew bootRun
+# open /repo?repo=<repo-id>
+# click "Validate candidates (LLM)" or "Generate LLM report"
+```
+
+**Status:** Completed. Added migration `V7__llm_runs.sql`, async `LlmEnrichmentService`, endpoints `/llm/validate`, `/llm/report`, `/llm/status`, and repository UI controls for separate LLM actions with live status polling. Verified with `./gradlew clean build`.
+
+## Slice 29: Repository Cleanup and Hard Delete for Trial Reset
+
+**Goal:** Allow users to reset onboarding outputs during local trials without manual DB operations.
+
+**Build:**
+
+- Add cleanup service with two modes:
+  - `cleanup`: delete repository-scoped indexed/derived data and runs, keep repository registration
+  - `hard-delete`: perform cleanup and remove repository registration
+- Add CLI commands:
+  - `cleanup <repo>`
+  - `delete-repo <repo>`
+- Add UI controls on repository page:
+  - `Delete Indexed Data`
+  - `Delete Repository Completely`
+- Require confirmation text in UI before destructive actions.
+
+**Deliverables:**
+
+- repository cleanup service
+- CLI delete/reset commands
+- UI cleanup/delete actions with confirmation
+
+**Acceptance Criteria:**
+
+- Users can reset a repository to onboarding-ready state without dropping the database.
+- Users can fully remove a repository and all derived data.
+- Destructive actions require explicit confirmation text in UI.
+
+**Test / Try It:**
+
+```bash
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar cleanup /path/to/repo
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar delete-repo /path/to/repo
+```
+
+**Status:** Completed. Added `RepositoryCleanupService`, CLI commands `cleanup` and `delete-repo`, and UI endpoints/actions `/repo/cleanup` and `/repo/hard-delete` with confirmation input on repository page. Verified with `./gradlew clean build`.
 
 ## Slice 22: Reviewer Feedback Loop
 

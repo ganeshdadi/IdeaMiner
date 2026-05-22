@@ -1,8 +1,10 @@
 package com.ideaminer.web;
 
 import com.ideaminer.service.FeaturePipelineService;
+import com.ideaminer.service.LlmEnrichmentService;
 import com.ideaminer.service.OnboardingService;
 import com.ideaminer.service.RepositoryRegistryService;
+import com.ideaminer.service.RepositoryCleanupService;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -16,14 +18,20 @@ import java.util.Map;
 public class DashboardController {
     private final RepositoryRegistryService repositoryRegistryService;
     private final OnboardingService onboardingService;
+    private final LlmEnrichmentService llmEnrichmentService;
     private final FeaturePipelineService featurePipelineService;
+    private final RepositoryCleanupService repositoryCleanupService;
 
     public DashboardController(RepositoryRegistryService repositoryRegistryService,
                                OnboardingService onboardingService,
-                               FeaturePipelineService featurePipelineService) {
+                               LlmEnrichmentService llmEnrichmentService,
+                               FeaturePipelineService featurePipelineService,
+                               RepositoryCleanupService repositoryCleanupService) {
         this.repositoryRegistryService = repositoryRegistryService;
         this.onboardingService = onboardingService;
+        this.llmEnrichmentService = llmEnrichmentService;
         this.featurePipelineService = featurePipelineService;
+        this.repositoryCleanupService = repositoryCleanupService;
     }
 
     @GetMapping("/")
@@ -59,5 +67,43 @@ public class DashboardController {
     @ResponseBody
     public Map<String, Object> onboardStatus(@RequestParam("runId") String runId) {
         return onboardingService.runStatus(runId);
+    }
+
+    @PostMapping("/llm/validate")
+    @ResponseBody
+    public Map<String, String> validateCandidates(@RequestParam("repo") String repo) {
+        String runId = llmEnrichmentService.startValidateCandidates(repo);
+        return Map.of("runId", runId, "repo", repo, "job", "validate-candidates");
+    }
+
+    @PostMapping("/llm/report")
+    @ResponseBody
+    public Map<String, String> llmReport(@RequestParam("repo") String repo) {
+        String runId = llmEnrichmentService.startLlmReport(repo);
+        return Map.of("runId", runId, "repo", repo, "job", "llm-report");
+    }
+
+    @GetMapping("/llm/status")
+    @ResponseBody
+    public Map<String, Object> llmStatus(@RequestParam("runId") String runId) {
+        return llmEnrichmentService.runStatus(runId);
+    }
+
+    @PostMapping("/repo/cleanup")
+    @ResponseBody
+    public Map<String, String> cleanup(@RequestParam("repo") String repo, @RequestParam("confirm") String confirm) {
+        if (!repo.equals(confirm)) {
+            throw new IllegalArgumentException("Confirmation does not match repository identifier.");
+        }
+        return Map.of("message", repositoryCleanupService.cleanup(repo));
+    }
+
+    @PostMapping("/repo/hard-delete")
+    @ResponseBody
+    public Map<String, String> hardDelete(@RequestParam("repo") String repo, @RequestParam("confirm") String confirm) {
+        if (!repo.equals(confirm)) {
+            throw new IllegalArgumentException("Confirmation does not match repository identifier.");
+        }
+        return Map.of("message", repositoryCleanupService.hardDelete(repo));
     }
 }

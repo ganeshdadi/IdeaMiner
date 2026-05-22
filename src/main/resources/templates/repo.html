@@ -4,10 +4,76 @@
 <body style="font-family: Arial, sans-serif; margin: 24px;">
 <a href="/">Home</a>
 <h2 th:text="'Repository: ' + ${repo}">Repository</h2>
+<div style="margin: 12px 0;">
+    <button id="validateBtn">Validate candidates (LLM)</button>
+    <button id="reportBtn">Generate LLM report</button>
+</div>
+<div style="margin: 12px 0; border:1px solid #ddd; padding:8px;">
+    <div>Cleanup / Delete</div>
+    <input id="confirmRepo" type="text" placeholder="Type repo id/path shown in URL to confirm" style="width:420px;">
+    <button id="cleanupBtn">Delete Indexed Data</button>
+    <button id="hardDeleteBtn">Delete Repository Completely</button>
+</div>
+<pre id="llmStatus" style="background:#f7f7f7; padding:8px;"></pre>
 <pre th:text="${status}">status</pre>
 <h3>Candidates</h3>
 <ul>
     <li th:each="c : ${candidates}" th:text="${c}">candidate</li>
 </ul>
+<script th:inline="javascript">
+const repo = [[${repo}]];
+const llmStatus = document.getElementById('llmStatus');
+
+document.getElementById('validateBtn').addEventListener('click', async () => {
+  await startLlmJob('/llm/validate');
+});
+
+document.getElementById('reportBtn').addEventListener('click', async () => {
+  await startLlmJob('/llm/report');
+});
+document.getElementById('cleanupBtn').addEventListener('click', async () => {
+  await destructive('/repo/cleanup');
+});
+document.getElementById('hardDeleteBtn').addEventListener('click', async () => {
+  await destructive('/repo/hard-delete');
+});
+
+async function startLlmJob(url) {
+  llmStatus.textContent = 'Starting...';
+  const body = new URLSearchParams({ repo });
+  const response = await fetch(url, { method: 'POST', body });
+  const payload = await response.json();
+  pollLlm(payload.runId);
+}
+
+function pollLlm(runId) {
+  const timer = setInterval(async () => {
+    const response = await fetch('/llm/status?runId=' + encodeURIComponent(runId));
+    const state = await response.json();
+    llmStatus.textContent = JSON.stringify(state, null, 2);
+    if (state.status === 'completed' || state.status === 'failed') {
+      clearInterval(timer);
+      window.location.reload();
+    }
+  }, 1500);
+}
+
+async function destructive(url) {
+  const confirm = document.getElementById('confirmRepo').value;
+  if (!confirm) {
+    llmStatus.textContent = 'Enter confirmation text.';
+    return;
+  }
+  const body = new URLSearchParams({ repo, confirm });
+  const response = await fetch(url, { method: 'POST', body });
+  const payload = await response.json();
+  llmStatus.textContent = payload.message || JSON.stringify(payload);
+  if (url.includes('hard-delete')) {
+    window.location.href = '/';
+  } else {
+    window.location.reload();
+  }
+}
+</script>
 </body>
 </html>
