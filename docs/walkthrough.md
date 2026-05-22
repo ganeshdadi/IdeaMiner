@@ -37,4 +37,4 @@ Finally, the tool generates a markdown report (`AI_Opportunity_Report.md`) in yo
 
 1.  **Import to IDE**: You can now open `/Users/ganeshbabudadi/projects/IdeaMiner` in IntelliJ IDEA or Eclipse.
 2.  **API Key**: Export your OpenAI API key in your terminal before running it: `export OPENAI_API_KEY="your-key-here"`.
-3.  **Run it**: You can compile and run it via Maven or your IDE to test it on one of your organization's repositories!
+3.  **Run it**: You can compile and run it via Gradle or your IDE to test it on one of your organization's repositories!

@@ -48,7 +48,7 @@ It was built to satisfy the following high‑level requirement:
 ## Prerequisites
 
 - **Java 17** (or newer)
-- **Maven** (to build the project)
+- **Gradle** (to build the project)
 - **OpenAI API key** (set as environment variable `OPENAI_API_KEY`)
 - (Optional) **Git** – to clone repositories you want to index
 
@@ -62,10 +62,10 @@ git clone https://github.com/your-org/IdeaMiner.git
 cd IdeaMiner
 
 # Build the project
-mvn clean package
+./gradlew clean build
 ```
 
-The build will download the required Maven dependencies, including:
+The build will download the required Gradle dependencies, including:
 - `JavaParser`
 - `LangChain4j` with the `all‑MiniLM‑L6‑v2` embedding model
 - `OpenAI` client for GPT‑4o
@@ -78,7 +78,7 @@ The build will download the required Maven dependencies, including:
 
 ```bash
 # Example: index a local clone of a Banking service repository
-java -jar target/ideaminer-0.0.1-SNAPSHOT.jar index /path/to/your/repo
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar index /path/to/your/repo
 ```
 
 The command will:
@@ -89,7 +89,7 @@ The command will:
 ### 2. Run the AI analysis
 
 ```bash
-java -jar target/ideaminer-0.0.1-SNAPSHOT.jar analyze
+java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar analyze
 ```
 
 The tool will:
