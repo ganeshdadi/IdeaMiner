@@ -22,14 +22,14 @@ ext {
 dependencies {
     implementation 'org.springframework.boot:spring-boot-starter'
     implementation 'org.springframework.boot:spring-boot-starter-jdbc'
+    implementation 'org.flywaydb:flyway-core'
+    implementation 'org.postgresql:postgresql'
 
     implementation "com.github.javaparser:javaparser-symbol-solver-core:${javaparserVersion}"
     implementation "dev.langchain4j:langchain4j:${langchain4jVersion}"
     implementation "dev.langchain4j:langchain4j-open-ai:${langchain4jVersion}"
     implementation "dev.langchain4j:langchain4j-embeddings-all-minilm-l6-v2:${langchain4jVersion}"
     implementation "dev.langchain4j:langchain4j-easy-rag:${langchain4jVersion}"
-    implementation 'org.xerial:sqlite-jdbc:3.45.3.0'
-
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
 }
 

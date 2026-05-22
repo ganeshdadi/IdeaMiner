@@ -1,40 +1,153 @@
-# IdeaMiner: AI Opportunity Discovery Tool
+# IdeaMiner Architecture Walkthrough
 
-I have successfully built the foundation for the `IdeaMiner` project! The architecture we designed is now fully implemented as a Java/Spring Boot CLI application. 
+IdeaMiner should be understood as a code intelligence system for business opportunity discovery.
 
-Here is a walkthrough of what was built and how the two main engines work together.
+It is not primarily a chatbot over code. It first converts source repositories into structured evidence, then uses deterministic opportunity detectors and LLM reasoning to produce explainable recommendations.
 
----
+## 1. Repository Ingestion
 
-## 1. The Ingestion Engine (The `index` command)
+The ingestion layer reads one or more source repositories and records:
 
-The ingestion engine is responsible for parsing your code without relying on generic text search. It uses native Java tools to deeply understand the repositories.
+- repository name
+- local path
+- branch, remote URL, and commit SHA when the directory is Git-backed
+- file path
+- language
+- content hash
+- indexing timestamp
 
-*   **JavaParser AST Extraction**: When you run the `index` command, the `JavaParserUtil` walks through the AST (Abstract Syntax Tree) of every `.java` file. It extracts the class name, the package, its structural type (e.g., `@RestController`, `@Service`), and calculates a cyclomatic complexity score by counting branching logic (`if`, `switch`).
-*   **Structured Storage**: This extracted metadata is saved into a local SQLite database (`ideaminer_metadata.db`). This allows us to quickly query for complex classes across millions of lines of code.
-*   **Vector Embeddings**: Simultaneously, the local `all-MiniLM-L6-v2` model converts the class signatures and code into semantic vector embeddings and stores them in a local JSON-backed Vector Store (`ideaminer_vectors.json`). This all happens locally on your CPU, without sending any code to OpenAI.
+This identity layer matters because every opportunity must trace back to exact source evidence.
 
-## 2. The Analysis Engine (The `analyze` command)
+## 2. Static Analysis
 
-The Analysis engine is where the magic happens. It uses the "Map-Reduce" pattern we discussed to discover unknown opportunities.
+The static analysis engine parses Java/Spring Boot code and extracts facts such as:
 
-*   **Step 1: The Map Phase (SQL Discovery)**: The `AnalysisService` queries the SQLite database to find the top 50 most complex classes, or classes specifically tagged as `BatchJob` or `Service`. It sends these high-level summaries to GPT-4o and asks it to brainstorm 3-5 potential "AI/ML Opportunities".
-*   **Step 2: The Deep Dive Phase (Vector Validation)**: Once GPT-4o has a few ideas, we take those ideas and embed them. We then query the local Vector Store to pull the actual source code related to those ideas. 
-*   **Step 3: The Reduce Phase**: GPT-4o looks at the *actual* code to validate if its idea makes sense, and filters out the bad ones.
+- classes and methods
+- Spring annotations
+- HTTP endpoints
+- services and repositories
+- entities and database access
+- scheduled jobs and batch jobs
+- message listeners
+- external integrations
+- method calls
+- complexity and branching signals
+- domain terms from names, comments, constants, and annotations
 
-## 3. The Output
+This produces structured facts that can be queried and scored. It is more reliable than asking an LLM to infer everything from raw source text.
 
-Finally, the tool generates a markdown report (`AI_Opportunity_Report.md`) in your working directory. It produces "Opportunity Cards" formatted like this:
+## 3. Code Intelligence Graph
 
-> [!TIP]
-> **Example Opportunity Card**
-> *   **Opportunity Title**: Real-time Fraud Detection
-> *   **Customer Benefit**: Prevents unauthorized transactions instantly rather than catching them in an overnight batch.
-> *   **Current State**: `com.bank.batch.NightlyReconciliationJob`
-> *   **Proposed AI Solution**: Replace the nightly batch rule engine with an inline ML scoring model.
+The graph connects facts into workflows.
 
-## Next Steps for You
+Example:
 
-1.  **Import to IDE**: You can now open `/Users/ganeshbabudadi/projects/IdeaMiner` in IntelliJ IDEA or Eclipse.
-2.  **API Key**: Export your OpenAI API key in your terminal before running it: `export OPENAI_API_KEY="your-key-here"`.
-3.  **Run it**: You can compile and run it via Gradle or your IDE to test it on one of your organization's repositories!
+```text
+Customer endpoint
+-> controller method
+-> eligibility service
+-> rule-heavy decision method
+-> database table
+-> notification service
+```
+
+This is where many real opportunities become visible. An AI or automation opportunity usually does not live in one class; it lives across a workflow.
+
+## 4. Search and Vector Retrieval
+
+IdeaMiner should use multiple retrieval styles:
+
+- SQL for deterministic facts
+- keyword search for names, constants, comments, and domain terms
+- vector search for semantic similarity over method-level code chunks
+
+Vector search is useful, but it should not be the whole product. It supports evidence retrieval after the system has found a plausible candidate.
+
+## 5. Opportunity Signal Engine
+
+The signal engine finds candidates before LLM reasoning.
+
+Examples:
+
+- A service with many branching rules around eligibility, fraud, pricing, or limits may indicate ML-assisted decisioning.
+- A nightly job that updates customer-visible status may indicate a real-time automation opportunity.
+- A flow that creates manual review cases may indicate document AI or workflow automation.
+- A retry-heavy integration in payments or account servicing may indicate anomaly detection or resilience opportunities.
+- Static offer or message selection may indicate personalization opportunities.
+
+Each signal produces a candidate with evidence references and preliminary scores.
+
+## 6. Evidence Retrieval
+
+For each candidate, the system retrieves:
+
+- direct code facts
+- related graph neighbors
+- source snippets or method summaries
+- affected endpoints
+- tables and external systems
+- scheduled jobs or message flows
+
+The output is a compact evidence package for one candidate.
+
+## 7. LLM Reasoning
+
+The LLM receives one candidate at a time.
+
+Its job is to:
+
+- validate whether the candidate is plausible
+- reject weak or unsupported ideas
+- explain the customer benefit
+- identify missing evidence
+- suggest whether AI, ML, workflow automation, or real-time processing is appropriate
+- produce structured JSON and final Markdown
+
+The LLM should not be asked to invent opportunities from a vague list of classes.
+
+## 8. Opportunity Report
+
+The final report contains ranked opportunity cards.
+
+Each card should include:
+
+- opportunity title
+- customer benefit
+- current state with code references
+- proposed solution
+- evidence strength
+- confidence score
+- AI suitability
+- automation suitability
+- data dependencies
+- risks and compliance considerations
+- recommended next step
+
+## 9. Human Feedback
+
+Reviewers should classify opportunities as:
+
+- accepted
+- rejected
+- duplicate
+- already planned
+- not customer-impacting
+- needs more evidence
+- compliance concern
+
+This feedback improves future detection and ranking.
+
+## 10. How the Current Prototype Evolves
+
+The current CLI prototype demonstrates the first pieces: local repository registration, PostgreSQL metadata storage, production Java file discovery, Java parsing, local embeddings, vector retrieval, and LLM report generation.
+
+The next architecture step is to move from an LLM-first analysis flow to an evidence-first flow:
+
+1. Add stable source-derived IDs.
+2. Store repository and file metadata.
+3. Index methods and logical chunks, not just classes.
+4. Add graph edges for calls, endpoints, tables, jobs, and integrations.
+5. Create deterministic opportunity signal detectors.
+6. Retrieve evidence per candidate.
+7. Ask the LLM to validate and explain each candidate.
+8. Store reviewer feedback.
