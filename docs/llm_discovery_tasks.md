@@ -36,15 +36,22 @@ The workflow starts after repository onboarding/indexing. It does not replace sc
 **Build:**
 
 - Use existing class/method facts as input.
+- Load the full indexed `.java` source file as class-summary context, rather than slicing by class line span.
+- Redact prompt-sensitive secrets before sending source context to the LLM.
+- For very large Java files, send a reduced source context containing imports, declarations, fields, method signatures, annotations, and high-signal logic lines; mark the context as `partial_class_source`.
 - Summarize at class level first, not method level.
 - Include class name, package, role inference, annotations, methods, complexity, domain terms, endpoints/jobs/db facts, and evidence references.
+- Call the configured chat-completion provider for structured class capability JSON when an approved API key is configured; otherwise persist deterministic fallback summaries with error details.
 - Store structured JSON with:
   - class purpose
   - business capability
   - domain concepts
+  - business rules
   - decisions made
   - workflows touched
-  - external systems/data touched
+  - data touched
+  - external systems touched
+  - side effects
   - opportunity hints
   - confidence
   - evidence references
@@ -52,6 +59,8 @@ The workflow starts after repository onboarding/indexing. It does not replace sc
 **Deliverables:**
 
 - class summary prompt
+- class summary LLM client
+- deterministic fallback summary path
 - class summary persistence
 - UI view for class capability facts
 
@@ -60,8 +69,10 @@ The workflow starts after repository onboarding/indexing. It does not replace sc
 - Every indexed class can produce one capability summary.
 - Summaries cite source class/file references.
 - Re-running updates existing summaries by stable ID.
+- A configured LLM receives source code plus metadata and returns only the approved structured fields.
+- Missing/unavailable LLM credentials do not fail the discovery run; they produce fallback summaries and preserve the error reason.
 
-**Status:** Completed. Extended `LlmDiscoveryService` with a `summarize-classes` stage that generates and upserts one class capability summary per indexed class into `llm_capability_summaries` (`UNIQUE (run_id, class_id)`), including class purpose, business capability hints, domain concepts, workflow hints, opportunity hints, confidence, and evidence references. Added inspection surfaces: CLI command `llm-capabilities <run-id>`, endpoint `/llm-discovery/capabilities?runId=...`, and UI template `llm-discovery-capabilities.html`. Verified with `./gradlew clean build` and a live run on `IdeaMiner` (`runId=llm_discovery_run_12ae439d63d73b1ecbcfc83869754755`) that completed with `classSummaries=43` and `43` persisted rows.
+**Status:** Completed. Extended `LlmDiscoveryService` with a `summarize-classes` stage that generates and upserts one class capability summary per indexed class into `llm_capability_summaries` (`UNIQUE (run_id, class_id)`). The stage reads the indexed Java source file as context, redacts prompt-sensitive content, sends full context as `full_class_source` when it fits the prompt budget, and sends reduced high-signal context as `partial_class_source` for large files. Added `ClassCapabilityLlmClient`, which calls the configured chat-completion model for structured JSON when real credentials are configured and falls back to deterministic summaries with preserved error details when the LLM is unavailable. Summaries store focused structured fields: class purpose, business capability, domain concepts, business rules, decisions made, workflows touched, data touched, external systems touched, side effects, opportunity hints, confidence, and evidence references. Evidence includes source context mode, truncation flag, source context size, original source size, source hash, source preview, and code-derived source signals without duplicating full source code into the database. Added inspection surfaces: CLI command `llm-capabilities <run-id>`, endpoint `/llm-discovery/capabilities?runId=...`, and UI template `llm-discovery-capabilities.html`. Verified with `./gradlew clean build`.
 
 ## Slice L3: On-Demand Method Deep Dive
 

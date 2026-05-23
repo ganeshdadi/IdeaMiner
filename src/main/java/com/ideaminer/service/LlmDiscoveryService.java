@@ -15,14 +15,25 @@ import java.util.Set;
 
 @Service
 public class LlmDiscoveryService {
+    private static final int SOURCE_CONTEXT_PREVIEW_CHARS = 1200;
+    private static final int MAX_FULL_SOURCE_CONTEXT_CHARS = 30000;
+    private static final int MAX_PARTIAL_SOURCE_CONTEXT_CHARS = 18000;
+
     private final RepositoryRegistryService repositoryRegistryService;
     private final JdbcTemplate jdbcTemplate;
     private final WorkspaceService workspaceService;
+    private final ClassCapabilityLlmClient classCapabilityLlmClient;
+    private final SecretRedactionService secretRedactionService;
 
-    public LlmDiscoveryService(RepositoryRegistryService repositoryRegistryService, JdbcTemplate jdbcTemplate, WorkspaceService workspaceService) {
+    public LlmDiscoveryService(RepositoryRegistryService repositoryRegistryService,
+                               JdbcTemplate jdbcTemplate,
+                               WorkspaceService workspaceService,
+                               ClassCapabilityLlmClient classCapabilityLlmClient) {
         this.repositoryRegistryService = repositoryRegistryService;
         this.jdbcTemplate = jdbcTemplate;
         this.workspaceService = workspaceService;
+        this.classCapabilityLlmClient = classCapabilityLlmClient;
+        this.secretRedactionService = new SecretRedactionService(jdbcTemplate);
     }
 
     public String startRepositoryRun(String repositoryIdentifier, String promptVersion, String provider, String model) {
@@ -379,49 +390,77 @@ public class LlmDiscoveryService {
                 List<String> terms = jdbcTemplate.queryForList(
                         "SELECT term FROM domain_terms WHERE source_type = 'class' AND source_id = ? ORDER BY weight DESC, term LIMIT 12",
                         String.class, classId);
+                List<String> methodSignatures = jdbcTemplate.queryForList("""
+                        SELECT method_name || '(' || COALESCE(signature, '') || ') -> ' || COALESCE(return_type, '')
+                        FROM methods
+                        WHERE class_id = ?
+                        ORDER BY method_name, signature
+                        LIMIT 80
+                        """, String.class, classId);
                 int complexity = ((Number) cls.get("cyclomatic_complexity")).intValue();
-                String purpose = inferPurpose(String.valueOf(cls.get("class_name")), String.valueOf(cls.get("class_type")), endpoints, jobs, dbAccess);
-                String summary = "Class " + cls.get("class_name") + " in package " + cls.get("package_name") +
-                        " appears to " + purpose + ". It has " + methodCount + " methods and complexity " + complexity + ".";
-                String summaryJson = "{"
+                String filePath = String.valueOf(cls.get("file_path"));
+                SourceFileContext sourceContext = sourceFileContext(repoId, classId, filePath);
+                List<String> sourceSignals = sourceSignals(sourceContext.source());
+                String purpose = inferCodeAwarePurpose(
+                        String.valueOf(cls.get("class_name")),
+                        String.valueOf(cls.get("class_type")),
+                        endpoints,
+                        jobs,
+                        dbAccess,
+                        sourceSignals);
+                String fallbackSummaryJson = "{"
+                        + "\"classPurpose\":" + JsonSupport.quote(purpose) + ","
+                        + "\"businessCapability\":" + JsonSupport.quote(inferBusinessCapability(terms, roles, sourceSignals)) + ","
+                        + "\"domainConcepts\":" + JsonSupport.array(domainConcepts(terms, sourceSignals)) + ","
+                        + "\"businessRules\":" + JsonSupport.array(businessRules(complexity, sourceSignals)) + ","
+                        + "\"decisionsMade\":" + JsonSupport.array(decisionsMade(complexity, sourceSignals)) + ","
+                        + "\"workflowsTouched\":" + JsonSupport.array(List.of(workflowHints(endpoints, jobs, dbAccess))) + ","
+                        + "\"dataTouched\":" + JsonSupport.array(dataTouched(dbAccess, sourceSignals)) + ","
+                        + "\"externalSystemsTouched\":" + JsonSupport.array(externalSystemsTouched(sourceSignals)) + ","
+                        + "\"sideEffects\":" + JsonSupport.array(sideEffects(endpoints, jobs, dbAccess, sourceSignals)) + ","
+                        + "\"opportunityHints\":" + JsonSupport.array(List.of(opportunityHints(endpoints, jobs, dbAccess, complexity))) + ","
+                        + "\"confidence\":" + confidenceFor(roles, complexity, sourceContext, sourceSignals) + ","
+                        + "\"evidence\":{"
                         + "\"classId\":" + JsonSupport.quote(classId) + ","
                         + "\"className\":" + JsonSupport.quote(String.valueOf(cls.get("class_name"))) + ","
                         + "\"packageName\":" + JsonSupport.quote(String.valueOf(cls.get("package_name"))) + ","
-                        + "\"filePath\":" + JsonSupport.quote(String.valueOf(cls.get("file_path"))) + ","
+                        + "\"filePath\":" + JsonSupport.quote(filePath) + ","
                         + "\"classType\":" + JsonSupport.quote(String.valueOf(cls.get("class_type"))) + ","
-                        + "\"summary\":" + JsonSupport.quote(summary) + ","
-                        + "\"classPurpose\":" + JsonSupport.quote(purpose) + ","
-                        + "\"businessCapability\":" + JsonSupport.quote(inferBusinessCapability(terms, roles)) + ","
-                        + "\"domainConcepts\":" + JsonSupport.array(terms) + ","
-                        + "\"decisionsMade\":" + JsonSupport.quote(complexity >= 5 ? "potentially rule-heavy" : "low-to-moderate decision complexity") + ","
-                        + "\"workflowsTouched\":" + JsonSupport.array(List.of(workflowHints(endpoints, jobs, dbAccess))) + ","
-                        + "\"externalSystemsOrDataTouched\":" + JsonSupport.quote(dbAccess > 0 ? "database access present" : "not detected") + ","
-                        + "\"opportunityHints\":" + JsonSupport.array(List.of(opportunityHints(endpoints, jobs, dbAccess, complexity))) + ","
-                        + "\"confidence\":" + confidenceFor(roles, complexity) + ","
-                        + "\"evidence\":{"
                         + "\"methodCount\":" + methodCount + ","
                         + "\"endpointCount\":" + endpoints + ","
                         + "\"jobCount\":" + jobs + ","
                         + "\"databaseAccessCount\":" + dbAccess + ","
                         + "\"roles\":" + JsonSupport.array(roles) + ","
+                        + "\"sourceContextMode\":" + JsonSupport.quote(sourceContext.mode()) + ","
+                        + "\"sourceContextChars\":" + sourceContext.source().length() + ","
+                        + "\"sourceContextTruncated\":" + sourceContext.truncated() + ","
+                        + "\"sourceOriginalChars\":" + sourceContext.originalChars() + ","
+                        + "\"sourceContextHash\":" + JsonSupport.quote(sourceContext.hash()) + ","
+                        + "\"sourceSignals\":" + JsonSupport.array(sourceSignals) + ","
+                        + "\"sourceContextPreview\":" + JsonSupport.quote(preview(sourceContext.source())) + ","
                         + "\"sourceSpan\":" + JsonSupport.sourceSpan(
                                 ((Number) cls.get("begin_line")).intValue(),
                                 ((Number) cls.get("end_line")).intValue())
                         + "}"
                         + "}";
+                String metadata = classSummaryMetadata(cls, classId, methodCount, endpoints, jobs, dbAccess, roles, terms, methodSignatures, complexity, sourceContext);
+                ClassCapabilityLlmClient.ClassCapabilitySummaryResult result = classCapabilityLlmClient.summarize(
+                        new ClassCapabilityLlmClient.ClassCapabilityPromptInput(metadata, sourceContext.source(), sourceContext.mode()),
+                        fallbackSummaryJson);
                 String id = StableId.of("llm_capability_", runId + ":" + classId);
                 jdbcTemplate.update("""
                         INSERT INTO llm_capability_summaries
-                        (id, run_id, repository_id, class_id, summary_json, status, prompt_version, provider, model, updated_at)
-                        VALUES (?, ?, ?, ?, ?::jsonb, 'completed', ?, ?, ?, now())
+                        (id, run_id, repository_id, class_id, summary_json, status, prompt_version, provider, model, error_details, updated_at)
+                        VALUES (?, ?, ?, ?, ?::jsonb, 'completed', ?, ?, ?, ?, now())
                         ON CONFLICT (run_id, class_id) DO UPDATE SET
                             summary_json = EXCLUDED.summary_json,
                             status = EXCLUDED.status,
                             prompt_version = EXCLUDED.prompt_version,
                             provider = EXCLUDED.provider,
                             model = EXCLUDED.model,
+                            error_details = EXCLUDED.error_details,
                             updated_at = now()
-                        """, id, runId, repoId, classId, summaryJson, promptVersion, provider, model);
+                        """, id, runId, repoId, classId, result.summaryJson(), promptVersion, provider, model, result.error());
                 count++;
             }
         }
@@ -692,10 +731,84 @@ public class LlmDiscoveryService {
         return "support domain workflows";
     }
 
-    private String inferBusinessCapability(List<String> terms, List<String> roles) {
+    private String inferCodeAwarePurpose(String className, String classType, long endpoints, long jobs, long dbAccess, List<String> sourceSignals) {
+        if (sourceSignals.contains("external_http_call") && sourceSignals.contains("persistence_access")) {
+            return "coordinate integration-heavy workflows that exchange data with external systems and persisted state";
+        }
+        if (sourceSignals.contains("business_rule_logic") && sourceSignals.contains("decision_logic")) {
+            return "apply business rules and decision logic for a domain workflow";
+        }
+        if (sourceSignals.contains("request_mapping") && sourceSignals.contains("persistence_access")) {
+            return "handle request workflows that read or change persisted business data";
+        }
+        if (sourceSignals.contains("scheduled_execution")) {
+            return "run scheduled or batch processing over business data";
+        }
+        return inferPurpose(className, classType, endpoints, jobs, dbAccess);
+    }
+
+    private String inferBusinessCapability(List<String> terms, List<String> roles, List<String> sourceSignals) {
         if (!terms.isEmpty()) return "domain capability around " + terms.get(0);
+        if (sourceSignals.contains("request_mapping")) return "API/request handling capability";
+        if (sourceSignals.contains("persistence_access")) return "data management capability";
+        if (sourceSignals.contains("external_http_call")) return "external integration capability";
         if (!roles.isEmpty()) return "capability aligned with role " + roles.get(0);
         return "general platform capability";
+    }
+
+    private List<String> domainConcepts(List<String> terms, List<String> sourceSignals) {
+        List<String> concepts = new ArrayList<>(terms);
+        if (sourceSignals.contains("persistence_access") && !concepts.contains("data")) concepts.add("data");
+        if (sourceSignals.contains("request_mapping") && !concepts.contains("request")) concepts.add("request");
+        if (sourceSignals.contains("scheduled_execution") && !concepts.contains("batch")) concepts.add("batch");
+        return concepts;
+    }
+
+    private List<String> businessRules(int complexity, List<String> sourceSignals) {
+        List<String> rules = new ArrayList<>();
+        if (sourceSignals.contains("business_rule_logic")) rules.add("contains explicit rule/validation/business condition terms");
+        if (complexity >= 5 || sourceSignals.contains("decision_logic")) rules.add("contains branching logic that may encode domain decisions");
+        if (rules.isEmpty()) rules.add("no strong business-rule signal detected from source context");
+        return rules;
+    }
+
+    private List<String> decisionsMade(int complexity, List<String> sourceSignals) {
+        List<String> decisions = new ArrayList<>();
+        if (sourceSignals.contains("decision_logic")) decisions.add("branches on conditional or switch logic");
+        if (complexity >= 8) decisions.add("high complexity suggests multiple decision paths");
+        else if (complexity >= 5) decisions.add("moderate complexity suggests some rule-driven behavior");
+        if (decisions.isEmpty()) decisions.add("low-to-moderate decision complexity");
+        return decisions;
+    }
+
+    private List<String> dataTouched(long dbAccess, List<String> sourceSignals) {
+        List<String> data = new ArrayList<>();
+        if (dbAccess > 0 || sourceSignals.contains("persistence_access")) data.add("persistent application data");
+        if (sourceSignals.contains("query_logic")) data.add("query result data");
+        if (sourceSignals.contains("dto_or_model_mapping")) data.add("DTO/model data");
+        if (data.isEmpty()) data.add("not detected");
+        return data;
+    }
+
+    private List<String> externalSystemsTouched(List<String> sourceSignals) {
+        List<String> systems = new ArrayList<>();
+        if (sourceSignals.contains("external_http_call")) systems.add("external HTTP/API system");
+        if (sourceSignals.contains("messaging")) systems.add("messaging/event system");
+        if (sourceSignals.contains("file_io")) systems.add("local or shared file system");
+        if (systems.isEmpty()) systems.add("not detected");
+        return systems;
+    }
+
+    private List<String> sideEffects(long endpoints, long jobs, long dbAccess, List<String> sourceSignals) {
+        List<String> effects = new ArrayList<>();
+        if (endpoints > 0) effects.add("serves API/request responses");
+        if (jobs > 0) effects.add("executes scheduled work");
+        if (dbAccess > 0 || sourceSignals.contains("persistence_access")) effects.add("reads or writes persisted data");
+        if (sourceSignals.contains("external_http_call")) effects.add("calls external systems");
+        if (sourceSignals.contains("messaging")) effects.add("publishes or consumes messages");
+        if (sourceSignals.contains("file_io")) effects.add("reads or writes files");
+        if (effects.isEmpty()) effects.add("not detected");
+        return effects;
     }
 
     private String[] workflowHints(long endpoints, long jobs, long dbAccess) {
@@ -718,6 +831,193 @@ public class LlmDiscoveryService {
         if (complexity >= 8) return Math.min(0.9, base + 0.08);
         if (complexity >= 5) return Math.min(0.86, base + 0.04);
         return base;
+    }
+
+    private double confidenceFor(List<String> roles, int complexity, SourceFileContext sourceContext, List<String> sourceSignals) {
+        double base = confidenceFor(roles, complexity);
+        if ("full_file_source".equals(sourceContext.mode())) base += 0.08;
+        if (!sourceSignals.isEmpty() && !sourceSignals.contains("metadata_only")) base += 0.04;
+        return Math.min(0.94, base);
+    }
+
+    private SourceFileContext sourceFileContext(String repositoryId, String classId, String filePath) {
+        if (filePath == null || filePath.isBlank() || "null".equals(filePath)) {
+            return SourceFileContext.empty();
+        }
+        try {
+            List<String> localPaths = jdbcTemplate.queryForList(
+                    "SELECT local_path FROM repositories WHERE id = ? AND local_path IS NOT NULL",
+                    String.class,
+                    repositoryId);
+            if (localPaths.isEmpty()) {
+                return SourceFileContext.empty();
+            }
+            Path root = Path.of(localPaths.get(0));
+            Path sourcePath = Path.of(filePath);
+            Path resolved = sourcePath.isAbsolute() ? sourcePath.normalize() : root.resolve(sourcePath).normalize();
+            if (!Files.isRegularFile(resolved)) {
+                return SourceFileContext.empty();
+            }
+            String source = Files.readString(resolved);
+            String redacted = secretRedactionService.redact("llm-class-source", classId, source);
+            String promptSource = promptSourceContext(redacted);
+            String mode = promptSource.length() == redacted.length() ? "full_class_source" : "partial_class_source";
+            return new SourceFileContext(promptSource, mode, StableId.of("source_context_", redacted), promptSource.length() != redacted.length(), redacted.length());
+        } catch (Exception exception) {
+            return SourceFileContext.empty();
+        }
+    }
+
+    private String promptSourceContext(String source) {
+        if (source.length() <= MAX_FULL_SOURCE_CONTEXT_CHARS) {
+            return source;
+        }
+
+        List<String> selected = new ArrayList<>();
+        int selectedChars = 0;
+        String[] lines = source.split("\\R");
+        for (String line : lines) {
+            String trimmed = line.trim();
+            if (trimmed.startsWith("package ")
+                    || trimmed.startsWith("import ")
+                    || trimmed.startsWith("@")
+                    || trimmed.contains(" class ")
+                    || trimmed.contains(" interface ")
+                    || trimmed.contains(" enum ")
+                    || looksLikeField(trimmed)
+                    || looksLikeMethodSignature(trimmed)
+                    || containsOpportunitySignal(trimmed)) {
+                selected.add(line);
+                selectedChars += line.length() + 1;
+            }
+            if (selectedChars >= MAX_PARTIAL_SOURCE_CONTEXT_CHARS) {
+                break;
+            }
+        }
+
+        String reduced = String.join("\n", selected);
+        if (reduced.isBlank()) {
+            return source.substring(0, Math.min(source.length(), MAX_PARTIAL_SOURCE_CONTEXT_CHARS));
+        }
+        if (reduced.length() > MAX_PARTIAL_SOURCE_CONTEXT_CHARS) {
+            return reduced.substring(0, MAX_PARTIAL_SOURCE_CONTEXT_CHARS);
+        }
+        return reduced;
+    }
+
+    private boolean looksLikeField(String trimmed) {
+        return trimmed.endsWith(";")
+                && !trimmed.startsWith("import ")
+                && !trimmed.contains("(")
+                && (trimmed.startsWith("private ") || trimmed.startsWith("protected ") || trimmed.startsWith("public "));
+    }
+
+    private boolean looksLikeMethodSignature(String trimmed) {
+        return trimmed.contains("(")
+                && (trimmed.endsWith("{") || trimmed.endsWith(";"))
+                && (trimmed.startsWith("public ")
+                || trimmed.startsWith("protected ")
+                || trimmed.startsWith("private ")
+                || trimmed.startsWith("static ")
+                || trimmed.startsWith("final "));
+    }
+
+    private boolean containsOpportunitySignal(String trimmed) {
+        String lower = trimmed.toLowerCase();
+        return lower.contains("if (")
+                || lower.contains("if(")
+                || lower.contains("switch")
+                || lower.contains("validate")
+                || lower.contains("eligible")
+                || lower.contains("approve")
+                || lower.contains("reject")
+                || lower.contains("risk")
+                || lower.contains("fraud")
+                || lower.contains("limit")
+                || lower.contains("resttemplate")
+                || lower.contains("webclient")
+                || lower.contains("jdbctemplate")
+                || lower.contains("entitymanager")
+                || lower.contains("@query")
+                || lower.contains("@scheduled");
+    }
+
+    private List<String> sourceSignals(String source) {
+        if (source == null || source.isBlank()) {
+            return List.of("metadata_only");
+        }
+        String lower = source.toLowerCase();
+        List<String> signals = new ArrayList<>();
+        addSignal(signals, lower.contains("@requestmapping") || lower.contains("@getmapping")
+                || lower.contains("@postmapping") || lower.contains("@putmapping") || lower.contains("@deletemapping"), "request_mapping");
+        addSignal(signals, lower.contains("@scheduled") || lower.contains("cron"), "scheduled_execution");
+        addSignal(signals, lower.contains("jdbctemplate") || lower.contains("entitymanager") || lower.contains("crudrepository")
+                || lower.contains("jparepository") || lower.contains("@repository"), "persistence_access");
+        addSignal(signals, lower.contains("@query") || lower.contains("select ") || lower.contains("insert ")
+                || lower.contains("update ") || lower.contains("delete "), "query_logic");
+        addSignal(signals, lower.contains("resttemplate") || lower.contains("webclient") || lower.contains("httpclient")
+                || lower.contains("openfeign") || lower.contains("@feignclient"), "external_http_call");
+        addSignal(signals, lower.contains("kafkatemplate") || lower.contains("@kafkalistener") || lower.contains("jms")
+                || lower.contains("rabbittemplate"), "messaging");
+        addSignal(signals, lower.contains("files.") || lower.contains("path.of(") || lower.contains("fileinputstream")
+                || lower.contains("fileoutputstream"), "file_io");
+        addSignal(signals, lower.contains("if (") || lower.contains("if(") || lower.contains("switch (")
+                || lower.contains("switch("), "decision_logic");
+        addSignal(signals, lower.contains("validate") || lower.contains("rule") || lower.contains("eligible")
+                || lower.contains("approve") || lower.contains("reject") || lower.contains("limit"), "business_rule_logic");
+        addSignal(signals, lower.contains("mapper") || lower.contains("dto") || lower.contains("model"), "dto_or_model_mapping");
+        addSignal(signals, lower.contains("try {") || lower.contains("catch ("), "exception_handling");
+        if (signals.isEmpty()) {
+            signals.add("general_code_context");
+        }
+        return signals;
+    }
+
+    private void addSignal(List<String> signals, boolean present, String signal) {
+        if (present && !signals.contains(signal)) {
+            signals.add(signal);
+        }
+    }
+
+    private String preview(String source) {
+        if (source == null || source.isBlank()) {
+            return "";
+        }
+        if (source.length() <= SOURCE_CONTEXT_PREVIEW_CHARS) {
+            return source;
+        }
+        return source.substring(0, SOURCE_CONTEXT_PREVIEW_CHARS);
+    }
+
+    private String classSummaryMetadata(Map<String, Object> cls,
+                                        String classId,
+                                        long methodCount,
+                                        long endpoints,
+                                        long jobs,
+                                        long dbAccess,
+                                        List<String> roles,
+                                        List<String> terms,
+                                        List<String> methodSignatures,
+                                        int complexity,
+                                        SourceFileContext sourceContext) {
+        return "{"
+                + "\"classId\":" + JsonSupport.quote(classId) + ","
+                + "\"className\":" + JsonSupport.quote(String.valueOf(cls.get("class_name"))) + ","
+                + "\"packageName\":" + JsonSupport.quote(String.valueOf(cls.get("package_name"))) + ","
+                + "\"filePath\":" + JsonSupport.quote(String.valueOf(cls.get("file_path"))) + ","
+                + "\"classType\":" + JsonSupport.quote(String.valueOf(cls.get("class_type"))) + ","
+                + "\"methodCount\":" + methodCount + ","
+                + "\"methodSignatures\":" + JsonSupport.array(methodSignatures) + ","
+                + "\"endpointCount\":" + endpoints + ","
+                + "\"jobCount\":" + jobs + ","
+                + "\"databaseAccessCount\":" + dbAccess + ","
+                + "\"roles\":" + JsonSupport.array(roles) + ","
+                + "\"domainTerms\":" + JsonSupport.array(terms) + ","
+                + "\"cyclomaticComplexity\":" + complexity + ","
+                + "\"sourceContextMode\":" + JsonSupport.quote(sourceContext.mode()) + ","
+                + "\"sourceContextChars\":" + sourceContext.source().length() + ","
+                + "\"sourceContextTruncated\":" + sourceContext.truncated()
+                + "}";
     }
 
     private List<String> scopedRepositoryIds(String scopeType, Object repositoryId, Object workspaceId) {
@@ -812,5 +1112,11 @@ public class LlmDiscoveryService {
             throw new IllegalArgumentException("Unknown workspace: " + workspaceName);
         }
         return ids.get(0);
+    }
+
+    private record SourceFileContext(String source, String mode, String hash, boolean truncated, int originalChars) {
+        private static SourceFileContext empty() {
+            return new SourceFileContext("", "metadata_only", "", false, 0);
+        }
     }
 }

@@ -566,13 +566,17 @@ When internal LLM chat completion capacity is abundant, add a separate LLM-heavy
 This workflow should start after repository indexing has completed:
 
 1. Reuse indexed classes, methods, roles, endpoints, jobs, database access, graph edges, domain terms, and chunks.
-2. Ask the LLM to create class-level capability summaries.
+2. Ask the LLM to create class-level capability summaries using the full indexed `.java` file as source context.
 3. Group class capabilities into business capabilities and workflows.
 4. Generate opportunity candidates across an expanded opportunity taxonomy.
 5. Validate candidates with evidence, missing-data analysis, and confidence scoring.
 6. Generate repo-level and workspace-level LLM discovery reports.
 
-Use class-level summaries as the first unit of LLM analysis. Method-level LLM summaries should be generated only on demand for high-complexity, ambiguous, or candidate-critical classes.
+Use class-level summaries as the first unit of LLM analysis. The class summary output should stay compact and structured around `classPurpose`, `businessCapability`, `domainConcepts`, `businessRules`, `decisionsMade`, `workflowsTouched`, `dataTouched`, `externalSystemsTouched`, `sideEffects`, `opportunityHints`, `confidence`, and `evidence`. Avoid default line-by-line explanation; method-level LLM summaries should be generated only on demand for high-complexity, ambiguous, or candidate-critical classes.
+
+The Java source file should be provided to the summarization step as context after prompt-safe redaction. If the source fits the prompt budget, send it as `full_class_source`. If the source is too large, send a reduced `partial_class_source` package containing imports, declarations, fields, annotations, method signatures, and high-signal logic lines. If source cannot be loaded, mark the context as `metadata_only`.
+
+The persisted summary should not duplicate the whole source file. Persist source context metadata instead: context mode, truncation flag, source size, original source size, source hash, short preview, file path, source span when available, and code-derived signals. If the configured chat-completion provider is unavailable, the workflow should not fail the run; it should persist a deterministic fallback summary and record the provider error for inspection.
 
 The LLM Discovery Workflow should produce structured JSON facts and store them separately from deterministic facts. LLM outputs may enrich graph/search/ranking, but should not overwrite parsed source facts.
 

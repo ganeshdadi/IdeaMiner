@@ -31,6 +31,41 @@
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header">LLM Discovery</div>
+        <div class="card-body">
+            <form id="llmDiscoveryStartForm" class="row g-2 align-items-center">
+                <div class="col-md-7">
+                    <input class="form-control" type="text" name="repo" placeholder="Repository id/path for LLM discovery">
+                </div>
+                <div class="col-auto">
+                    <button type="submit" class="btn btn-primary">Start LLM Discovery</button>
+                </div>
+            </form>
+            <form id="llmDiscoveryViewsForm" class="row g-2 align-items-center mt-3">
+                <div class="col-md-7">
+                    <input class="form-control" type="text" name="runId" placeholder="Paste LLM discovery run id">
+                </div>
+                <div class="col-auto">
+                    <button type="button" id="openCapabilitiesBtn" class="btn btn-outline-secondary">Capabilities</button>
+                </div>
+                <div class="col-auto">
+                    <button type="button" id="openDeepDivesBtn" class="btn btn-outline-secondary">Deep Dives</button>
+                </div>
+                <div class="col-auto">
+                    <button type="button" id="openWorkflowsBtn" class="btn btn-outline-secondary">Workflows</button>
+                </div>
+                <div class="col-auto">
+                    <button type="button" id="openOpportunitiesBtn" class="btn btn-outline-secondary">Opportunities</button>
+                </div>
+                <div class="col-auto">
+                    <button type="button" id="openReviewsBtn" class="btn btn-outline-secondary">Reviews</button>
+                </div>
+            </form>
+            <pre id="llmDiscoveryStatus" class="bg-body-tertiary border rounded p-2 mt-3 mb-0"></pre>
+        </div>
+    </div>
+
     <div class="card">
         <div class="card-header">Repositories</div>
         <div class="table-responsive">
@@ -55,6 +90,9 @@
 const form = document.getElementById('onboardForm');
 const runStatus = document.getElementById('runStatus');
 const browseBtn = document.getElementById('browseBtn');
+const llmStartForm = document.getElementById('llmDiscoveryStartForm');
+const llmViewsForm = document.getElementById('llmDiscoveryViewsForm');
+const llmDiscoveryStatus = document.getElementById('llmDiscoveryStatus');
 
 browseBtn.addEventListener('click', async () => {
   runStatus.textContent = 'Opening folder picker...';
@@ -103,6 +141,45 @@ document.querySelectorAll('.reindexBtn').forEach((button) => {
     poll(payload.runId, repoPath);
   });
 });
+
+llmStartForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  const repo = llmStartForm.repo.value;
+  if (!repo) return;
+  llmDiscoveryStatus.textContent = 'Starting LLM discovery...';
+  const body = new URLSearchParams({ repo });
+  const response = await fetch('/llm-discovery/start', { method: 'POST', body });
+  const payload = await response.json();
+  llmViewsForm.runId.value = payload.runId;
+  llmDiscoveryStatus.textContent = 'Run: ' + payload.runId;
+  pollLlmDiscovery(payload.runId);
+});
+
+function pollLlmDiscovery(runId) {
+  const timer = setInterval(async () => {
+    const response = await fetch('/llm-discovery/status?runId=' + encodeURIComponent(runId));
+    const state = await response.json();
+    llmDiscoveryStatus.textContent = JSON.stringify(state, null, 2);
+    if (state.status === 'completed' || state.status === 'failed') {
+      clearInterval(timer);
+    }
+  }, 1500);
+}
+
+function openRunView(path) {
+  const runId = llmViewsForm.runId.value;
+  if (!runId) {
+    llmDiscoveryStatus.textContent = 'Enter a run id first.';
+    return;
+  }
+  window.location.href = path + '?runId=' + encodeURIComponent(runId);
+}
+
+document.getElementById('openCapabilitiesBtn').addEventListener('click', () => openRunView('/llm-discovery/capabilities'));
+document.getElementById('openDeepDivesBtn').addEventListener('click', () => openRunView('/llm-discovery/method-deep-dives'));
+document.getElementById('openWorkflowsBtn').addEventListener('click', () => openRunView('/llm-discovery/workflows'));
+document.getElementById('openOpportunitiesBtn').addEventListener('click', () => openRunView('/llm-discovery/opportunities'));
+document.getElementById('openReviewsBtn').addEventListener('click', () => openRunView('/llm-discovery/reviews'));
 </script>
 </body>
 </html>
