@@ -629,6 +629,10 @@ Use feedback to:
 - asynchronous onboarding job runner with live progress polling
 - workspace-level combined detection without re-scanning unchanged repositories
 - local UI for onboarding, progress visibility, run diagnostics, and repository/workspace statistics
+- local UI workspace management:
+  - create workspace
+  - add/remove repositories
+  - delete workspace with confirmation
 - separate asynchronous LLM enrichment jobs:
   - validate candidates
   - generate LLM report

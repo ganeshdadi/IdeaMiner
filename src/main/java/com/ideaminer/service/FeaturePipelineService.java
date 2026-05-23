@@ -603,6 +603,41 @@ public class FeaturePipelineService {
                 """, (rs, rowNum) -> rs.getString("name") + " repositories=" + rs.getLong("repo_count"));
     }
 
+    public List<Map<String, Object>> workspaceSummaries() {
+        return jdbcTemplate.queryForList("""
+                SELECT w.id, w.name, count(wr.repository_id) AS repo_count
+                FROM workspaces w
+                LEFT JOIN workspace_repositories wr ON wr.workspace_id = w.id
+                GROUP BY w.id, w.name
+                ORDER BY w.name
+                """);
+    }
+
+    public List<Map<String, Object>> workspaceRepositories(String workspaceName) {
+        String id = workspaceId(workspaceName);
+        return jdbcTemplate.queryForList("""
+                SELECT r.id, r.name, r.local_path
+                FROM workspace_repositories wr
+                JOIN repositories r ON r.id = wr.repository_id
+                WHERE wr.workspace_id = ?
+                ORDER BY r.name
+                """, id);
+    }
+
+    public String removeRepositoryFromWorkspace(String workspaceName, String repositoryIdentifier) {
+        RepositoryRegistration repository = queryService.repository(repositoryIdentifier);
+        String workspaceId = workspaceId(workspaceName);
+        jdbcTemplate.update("DELETE FROM workspace_repositories WHERE workspace_id = ? AND repository_id = ?", workspaceId, repository.id());
+        return "Removed " + repository.name() + " from workspace " + workspaceName;
+    }
+
+    public String deleteWorkspace(String workspaceName) {
+        String workspaceId = workspaceId(workspaceName);
+        jdbcTemplate.update("DELETE FROM workspace_repositories WHERE workspace_id = ?", workspaceId);
+        jdbcTemplate.update("DELETE FROM workspaces WHERE id = ?", workspaceId);
+        return "Workspace deleted: " + workspaceName;
+    }
+
     public List<String> feedback(String candidateId, String state, String notes) {
         String id = StableId.of("feedback_", candidateId + ":" + state + ":" + System.currentTimeMillis());
         jdbcTemplate.update("INSERT INTO review_feedback (id, candidate_id, state, notes) VALUES (?, ?, ?, ?)",

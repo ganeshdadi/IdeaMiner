@@ -21,22 +21,27 @@ public class DashboardController {
     private final LlmEnrichmentService llmEnrichmentService;
     private final FeaturePipelineService featurePipelineService;
     private final RepositoryCleanupService repositoryCleanupService;
+    private final LocalFolderPickerService localFolderPickerService;
 
     public DashboardController(RepositoryRegistryService repositoryRegistryService,
                                OnboardingService onboardingService,
                                LlmEnrichmentService llmEnrichmentService,
                                FeaturePipelineService featurePipelineService,
-                               RepositoryCleanupService repositoryCleanupService) {
+                               RepositoryCleanupService repositoryCleanupService,
+                               LocalFolderPickerService localFolderPickerService) {
         this.repositoryRegistryService = repositoryRegistryService;
         this.onboardingService = onboardingService;
         this.llmEnrichmentService = llmEnrichmentService;
         this.featurePipelineService = featurePipelineService;
         this.repositoryCleanupService = repositoryCleanupService;
+        this.localFolderPickerService = localFolderPickerService;
     }
 
     @GetMapping("/")
     public String home(Model model) {
         model.addAttribute("repos", repositoryRegistryService.listRepositories());
+        model.addAttribute("workspaces", featurePipelineService.workspaceSummaries());
+        model.addAttribute("onboardingService", onboardingService);
         return "dashboard";
     }
 
@@ -45,6 +50,12 @@ public class DashboardController {
     public Map<String, String> onboard(@RequestParam("repoPath") String repoPath) {
         String runId = onboardingService.startOnboarding(repoPath, null, false);
         return Map.of("runId", runId, "repo", repoPath);
+    }
+
+    @PostMapping("/browse-repo")
+    @ResponseBody
+    public Map<String, String> browseRepo() {
+        return localFolderPickerService.chooseFolder();
     }
 
     @GetMapping("/repo")
@@ -56,11 +67,45 @@ public class DashboardController {
     }
 
     @GetMapping("/workspace")
-    public String workspace(@RequestParam("name") String name, Model model) {
+    public String workspace(@RequestParam(value = "name", required = false) String name, Model model) {
+        if (name == null || name.isBlank()) {
+            model.addAttribute("workspaces", featurePipelineService.workspaceSummaries());
+            model.addAttribute("repos", repositoryRegistryService.listRepositories());
+            return "workspace-list";
+        }
         model.addAttribute("name", name);
         model.addAttribute("candidates", featurePipelineService.workspaceCandidates(name));
-        model.addAttribute("workspaces", featurePipelineService.workspace("list", null, null));
+        model.addAttribute("workspaces", featurePipelineService.workspaceSummaries());
+        model.addAttribute("workspaceRepos", featurePipelineService.workspaceRepositories(name));
+        model.addAttribute("repos", repositoryRegistryService.listRepositories());
         return "workspace";
+    }
+
+    @PostMapping("/workspace/create")
+    public String createWorkspace(@RequestParam("name") String name) {
+        featurePipelineService.workspace("create", name, null);
+        return "redirect:/workspace?name=" + name;
+    }
+
+    @PostMapping("/workspace/add")
+    public String addWorkspaceRepo(@RequestParam("name") String name, @RequestParam("repo") String repo) {
+        featurePipelineService.workspace("add", name, repo);
+        return "redirect:/workspace?name=" + name;
+    }
+
+    @PostMapping("/workspace/remove")
+    public String removeWorkspaceRepo(@RequestParam("name") String name, @RequestParam("repo") String repo) {
+        featurePipelineService.removeRepositoryFromWorkspace(name, repo);
+        return "redirect:/workspace?name=" + name;
+    }
+
+    @PostMapping("/workspace/delete")
+    public String deleteWorkspace(@RequestParam("name") String name, @RequestParam("confirm") String confirm) {
+        if (!name.equals(confirm)) {
+            throw new IllegalArgumentException("Confirmation does not match workspace name.");
+        }
+        featurePipelineService.deleteWorkspace(name);
+        return "redirect:/workspace";
     }
 
     @GetMapping("/onboard/status")

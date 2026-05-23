@@ -948,6 +948,43 @@ java -jar build/libs/ideaminer-0.0.1-SNAPSHOT.jar delete-repo /path/to/repo
 
 **Status:** Completed. Added `RepositoryCleanupService`, CLI commands `cleanup` and `delete-repo`, and UI endpoints/actions `/repo/cleanup` and `/repo/hard-delete` with confirmation input on repository page. Verified with `./gradlew clean build`.
 
+## Slice 30: UI Workspace Create/Delete/Manage
+
+**Goal:** Make workspace lifecycle and membership fully manageable from UI without CLI dependency.
+
+**Build:**
+
+- Add workspace management landing page (`/workspace`) that lists existing workspaces.
+- Add UI action to create workspace.
+- Add workspace detail page enhancements to:
+  - add repository to workspace
+  - remove repository from workspace
+  - delete workspace with confirmation
+- Add backend endpoints for create/add/remove/delete workspace actions.
+
+**Deliverables:**
+
+- workspace management UI pages
+- workspace CRUD/membership web endpoints
+- confirmation flow for workspace deletion
+
+**Acceptance Criteria:**
+
+- Users can create workspace from UI.
+- Users can manage workspace repository membership from UI.
+- Users can delete workspace from UI with explicit confirmation.
+- `/workspace` no longer errors when `name` query parameter is absent.
+
+**Test / Try It:**
+
+```bash
+./gradlew bootRun
+# open /workspace
+# create a workspace, add/remove repos, delete workspace
+```
+
+**Status:** Completed. Added `/workspace` list/create page, workspace detail management actions, backend endpoints (`/workspace/create`, `/workspace/add`, `/workspace/remove`, `/workspace/delete`), and confirmation-based delete flow. Verified with `./gradlew clean build`.
+
 ## Slice 22: Reviewer Feedback Loop
 
 **Goal:** Capture human review decisions and use them in future output.
