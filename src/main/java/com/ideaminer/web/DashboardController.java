@@ -3,6 +3,7 @@ package com.ideaminer.web;
 import com.ideaminer.service.FeaturePipelineService;
 import com.ideaminer.service.LlmEnrichmentService;
 import com.ideaminer.service.OnboardingService;
+import com.ideaminer.service.LlmDiscoveryService;
 import com.ideaminer.service.RepositoryRegistryService;
 import com.ideaminer.service.RepositoryCleanupService;
 import org.springframework.stereotype.Controller;
@@ -19,6 +20,7 @@ public class DashboardController {
     private final RepositoryRegistryService repositoryRegistryService;
     private final OnboardingService onboardingService;
     private final LlmEnrichmentService llmEnrichmentService;
+    private final LlmDiscoveryService llmDiscoveryService;
     private final FeaturePipelineService featurePipelineService;
     private final RepositoryCleanupService repositoryCleanupService;
     private final LocalFolderPickerService localFolderPickerService;
@@ -26,12 +28,14 @@ public class DashboardController {
     public DashboardController(RepositoryRegistryService repositoryRegistryService,
                                OnboardingService onboardingService,
                                LlmEnrichmentService llmEnrichmentService,
+                               LlmDiscoveryService llmDiscoveryService,
                                FeaturePipelineService featurePipelineService,
                                RepositoryCleanupService repositoryCleanupService,
                                LocalFolderPickerService localFolderPickerService) {
         this.repositoryRegistryService = repositoryRegistryService;
         this.onboardingService = onboardingService;
         this.llmEnrichmentService = llmEnrichmentService;
+        this.llmDiscoveryService = llmDiscoveryService;
         this.featurePipelineService = featurePipelineService;
         this.repositoryCleanupService = repositoryCleanupService;
         this.localFolderPickerService = localFolderPickerService;
@@ -132,6 +136,95 @@ public class DashboardController {
     @ResponseBody
     public Map<String, Object> llmStatus(@RequestParam("runId") String runId) {
         return llmEnrichmentService.runStatus(runId);
+    }
+
+    @PostMapping("/llm-discovery/start")
+    @ResponseBody
+    public Map<String, String> startLlmDiscovery(@RequestParam("repo") String repo) {
+        String runId = llmDiscoveryService.startRepositoryRun(repo, "v1", "internal", "gpt-4o");
+        return Map.of("runId", runId, "scope", "repository", "repo", repo);
+    }
+
+    @PostMapping("/llm-discovery/start-workspace")
+    @ResponseBody
+    public Map<String, String> startLlmDiscoveryWorkspace(@RequestParam("workspace") String workspace) {
+        String runId = llmDiscoveryService.startWorkspaceRun(workspace, "v1", "internal", "gpt-4o");
+        return Map.of("runId", runId, "scope", "workspace", "workspace", workspace);
+    }
+
+    @GetMapping("/llm-discovery/status")
+    @ResponseBody
+    public Map<String, Object> llmDiscoveryStatus(@RequestParam("runId") String runId) {
+        return llmDiscoveryService.status(runId);
+    }
+
+    @GetMapping("/llm-discovery/capabilities")
+    public String llmDiscoveryCapabilities(@RequestParam("runId") String runId, Model model) {
+        model.addAttribute("runId", runId);
+        model.addAttribute("runStatus", llmDiscoveryService.status(runId));
+        model.addAttribute("capabilities", llmDiscoveryService.capabilitySummaries(runId));
+        return "llm-discovery-capabilities";
+    }
+
+    @GetMapping("/llm-discovery/method-deep-dives")
+    public String llmDiscoveryMethodDeepDives(@RequestParam("runId") String runId, Model model) {
+        model.addAttribute("runId", runId);
+        model.addAttribute("runStatus", llmDiscoveryService.status(runId));
+        model.addAttribute("deepDives", llmDiscoveryService.methodDeepDives(runId));
+        return "llm-discovery-method-deep-dives";
+    }
+
+    @GetMapping("/llm-discovery/workflows")
+    public String llmDiscoveryWorkflows(@RequestParam("runId") String runId, Model model) {
+        model.addAttribute("runId", runId);
+        model.addAttribute("runStatus", llmDiscoveryService.status(runId));
+        model.addAttribute("workflows", llmDiscoveryService.workflowMaps(runId));
+        return "llm-discovery-workflows";
+    }
+
+    @GetMapping("/llm-discovery/opportunities")
+    public String llmDiscoveryOpportunities(@RequestParam("runId") String runId, Model model) {
+        model.addAttribute("runId", runId);
+        model.addAttribute("runStatus", llmDiscoveryService.status(runId));
+        model.addAttribute("opportunities", llmDiscoveryService.opportunityCandidates(runId));
+        return "llm-discovery-opportunities";
+    }
+
+    @GetMapping("/llm-discovery/reviews")
+    public String llmDiscoveryReviews(@RequestParam("runId") String runId, Model model) {
+        model.addAttribute("runId", runId);
+        model.addAttribute("runStatus", llmDiscoveryService.status(runId));
+        model.addAttribute("reviews", llmDiscoveryService.opportunityReviews(runId));
+        return "llm-discovery-reviews";
+    }
+
+    @PostMapping("/llm-discovery/report")
+    @ResponseBody
+    public Map<String, String> llmDiscoveryReport(@RequestParam("runId") String runId) {
+        return Map.of("reportPath", llmDiscoveryService.generateDiscoveryReport(runId).toString());
+    }
+
+    @PostMapping("/llm-discovery/feedback")
+    @ResponseBody
+    public Map<String, String> llmDiscoveryFeedback(@RequestParam("candidateId") String candidateId,
+                                                    @RequestParam("decision") String decision,
+                                                    @RequestParam(value = "notes", required = false) String notes) {
+        String feedbackId = llmDiscoveryService.recordOpportunityFeedback(candidateId, decision, notes);
+        return Map.of("feedbackId", feedbackId);
+    }
+
+    @PostMapping("/llm-discovery/rerank")
+    @ResponseBody
+    public Map<String, String> llmDiscoveryRerank(@RequestParam("runId") String runId) {
+        int updated = llmDiscoveryService.rerank(runId);
+        return Map.of("updated", String.valueOf(updated));
+    }
+
+    @PostMapping("/llm-discovery/retry")
+    @ResponseBody
+    public Map<String, String> llmDiscoveryRetry(@RequestParam("runId") String runId) {
+        String newRunId = llmDiscoveryService.retryFailedRun(runId);
+        return Map.of("runId", newRunId);
     }
 
     @PostMapping("/repo/cleanup")

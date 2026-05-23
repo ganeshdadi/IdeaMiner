@@ -6,6 +6,7 @@ import com.ideaminer.service.HealthService;
 import com.ideaminer.service.AnalysisService;
 import com.ideaminer.service.IngestionService;
 import com.ideaminer.service.MethodIndexService;
+import com.ideaminer.service.LlmDiscoveryService;
 import com.ideaminer.service.OnboardingService;
 import com.ideaminer.service.RepositoryRegistryService;
 import com.ideaminer.service.RepositoryCleanupService;
@@ -31,6 +32,7 @@ public class IdeaMinerApplication {
                                  SourceFileScanService sourceFileScanService,
                                  ClassIndexService classIndexService,
                                  MethodIndexService methodIndexService,
+                                 LlmDiscoveryService llmDiscoveryService,
                                  OnboardingService onboardingService,
                                  RepositoryCleanupService repositoryCleanupService,
                                  FeaturePipelineService featurePipelineService,
@@ -204,6 +206,86 @@ public class IdeaMinerApplication {
                 } else if ("status".equalsIgnoreCase(command)) {
                     requireRepo(args);
                     System.out.println(onboardingService.status(args[1]));
+                } else if ("llm-discover".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Usage: llm-discover <repo> [--prompt-version v1] [--provider internal] [--model gpt-4o]");
+                        System.out.println("   or: llm-discover --workspace <name> [--prompt-version v1] [--provider internal] [--model gpt-4o]");
+                        return;
+                    }
+                    String promptVersion = optionValue(args, "--prompt-version");
+                    String provider = optionValue(args, "--provider");
+                    String model = optionValue(args, "--model");
+                    String workspace = optionValue(args, "--workspace");
+                    if (promptVersion == null) promptVersion = "v1";
+                    if (provider == null) provider = "internal";
+                    if (model == null) model = "gpt-4o";
+                    String runId = workspace != null
+                            ? llmDiscoveryService.startWorkspaceRun(workspace, promptVersion, provider, model)
+                            : llmDiscoveryService.startRepositoryRun(args[1], promptVersion, provider, model);
+                    System.out.println("LLM discovery started. runId=" + runId);
+                } else if ("llm-discovery-status".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    System.out.println(llmDiscoveryService.status(args[1]));
+                } else if ("llm-capabilities".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    llmDiscoveryService.capabilitySummaries(args[1]).forEach(System.out::println);
+                } else if ("llm-method-deep-dives".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    llmDiscoveryService.methodDeepDives(args[1]).forEach(System.out::println);
+                } else if ("llm-workflows".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    llmDiscoveryService.workflowMaps(args[1]).forEach(System.out::println);
+                } else if ("llm-opportunities".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    llmDiscoveryService.opportunityCandidates(args[1]).forEach(System.out::println);
+                } else if ("llm-opportunity-reviews".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    llmDiscoveryService.opportunityReviews(args[1]).forEach(System.out::println);
+                } else if ("llm-discovery-report".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    System.out.println("Report written: " + llmDiscoveryService.generateDiscoveryReport(args[1]));
+                } else if ("llm-opportunity-feedback".equalsIgnoreCase(command)) {
+                    if (args.length < 3) {
+                        System.out.println("Usage: llm-opportunity-feedback <candidate-id> <decision> [--notes text]");
+                        return;
+                    }
+                    String id = llmDiscoveryService.recordOpportunityFeedback(args[1], args[2], optionValue(args, "--notes"));
+                    System.out.println("Feedback recorded: " + id);
+                } else if ("llm-rerank".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing run id.");
+                        return;
+                    }
+                    int updated = llmDiscoveryService.rerank(args[1]);
+                    System.out.println("Reranked candidates: " + updated);
+                } else if ("llm-discover-retry".equalsIgnoreCase(command)) {
+                    if (args.length < 2) {
+                        System.out.println("Missing failed run id.");
+                        return;
+                    }
+                    String newRunId = llmDiscoveryService.retryFailedRun(args[1]);
+                    System.out.println("LLM discovery retry started. newRunId=" + newRunId);
                 } else if ("cleanup".equalsIgnoreCase(command)) {
                     requireRepo(args);
                     System.out.println(repositoryCleanupService.cleanup(args[1]));
@@ -316,6 +398,18 @@ public class IdeaMinerApplication {
         System.out.println("  java -jar ideaminer.jar workspace add <name> <repo>");
         System.out.println("  java -jar ideaminer.jar onboard <repo-path-or-id> [--from <stage>] [--resume]");
         System.out.println("  java -jar ideaminer.jar status <repo-path-or-id>");
+        System.out.println("  java -jar ideaminer.jar llm-discover <repo> [--prompt-version v1] [--provider internal] [--model gpt-4o]");
+        System.out.println("  java -jar ideaminer.jar llm-discover --workspace <name> [--prompt-version v1] [--provider internal] [--model gpt-4o]");
+        System.out.println("  java -jar ideaminer.jar llm-discovery-status <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-capabilities <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-method-deep-dives <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-workflows <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-opportunities <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-opportunity-reviews <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-discovery-report <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-opportunity-feedback <candidate-id> <decision> [--notes text]");
+        System.out.println("  java -jar ideaminer.jar llm-rerank <run-id>");
+        System.out.println("  java -jar ideaminer.jar llm-discover-retry <failed-run-id>");
         System.out.println("  java -jar ideaminer.jar cleanup <repo-path-or-id>      # Delete indexed data, keep repository registration");
         System.out.println("  java -jar ideaminer.jar delete-repo <repo-path-or-id>  # Delete indexed data and repository registration");
         System.out.println("  java -jar ideaminer.jar feedback <candidate-id> <state> [--notes text]");

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>LLM Workflow Maps</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+<div class="container py-4">
+    <div class="d-flex gap-2 mb-3">
+        <a href="/" class="btn btn-outline-secondary btn-sm">Home</a>
+    </div>
+    <h2 class="mb-2">LLM Workflow Maps</h2>
+    <p class="text-secondary mb-3" th:text="'Run: ' + ${runId}"></p>
+    <pre class="bg-body-tertiary border rounded p-2" th:text="${runStatus}">status</pre>
+    <div class="card mt-3">
+        <div class="card-header">Workflows</div>
+        <div class="table-responsive">
+            <table class="table table-striped table-hover table-sm mb-0">
+                <thead>
+                <tr>
+                    <th>Workflow Name</th>
+                    <th>Scope</th>
+                    <th>Status</th>
+                    <th>Workflow JSON</th>
+                </tr>
+                </thead>
+                <tbody>
+                <tr th:each="row : ${workflows}">
+                    <td th:text="${row.get('workflow_name')}">workflow</td>
+                    <td th:text="${row.get('scope_type')}">scope</td>
+                    <td th:text="${row.get('status')}">status</td>
+                    <td><pre class="mb-0" th:text="${row.get('workflow_json')}">json</pre></td>
+                </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+</body>
+</html>

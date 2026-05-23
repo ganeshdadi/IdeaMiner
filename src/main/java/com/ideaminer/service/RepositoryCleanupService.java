@@ -18,6 +18,7 @@ public class RepositoryCleanupService {
         RepositoryRegistration repository = repositoryRegistryService.resolve(repositoryIdentifier);
         String repositoryId = repository.id();
         jdbcTemplate.update("DELETE FROM llm_runs WHERE repository_id = ?", repositoryId);
+        jdbcTemplate.update("DELETE FROM llm_discovery_runs WHERE repository_id = ?", repositoryId);
         jdbcTemplate.update("DELETE FROM onboarding_runs WHERE repository_id = ?", repositoryId);
         jdbcTemplate.update("DELETE FROM generated_reports WHERE repository_id = ?", repositoryId);
         jdbcTemplate.update("DELETE FROM workspace_repositories WHERE repository_id = ?", repositoryId);

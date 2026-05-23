@@ -15,6 +15,13 @@ The core architecture is:
 
 Important implementation rule: repository scanning and static analysis should not require an LLM. The indexing pipeline must be deterministic, repeatable, testable, and safe to run on sensitive code. LLM usage belongs later in the flow, after the system has already generated evidence-backed opportunity candidates.
 
+The system now supports two complementary discovery lanes:
+
+1. **Deterministic Discovery Workflow:** evidence-first static analysis, deterministic detectors, optional LLM validation/reporting.
+2. **LLM Discovery Workflow:** LLM-heavy capability discovery and opportunity ideation over already indexed code facts, intended for organizations with abundant internal LLM capacity.
+
+The LLM Discovery Workflow must reuse indexed repository facts and should not replace deterministic scanning, parsing, stable IDs, or evidence storage.
+
 ## 1. Target Architecture
 
 ```mermaid
@@ -551,6 +558,48 @@ Outputs should be JSON first:
 ```
 
 Then render the final Markdown report from structured output.
+
+## 12.1 LLM Discovery Workflow
+
+When internal LLM chat completion capacity is abundant, add a separate LLM-heavy discovery workflow beside the deterministic workflow.
+
+This workflow should start after repository indexing has completed:
+
+1. Reuse indexed classes, methods, roles, endpoints, jobs, database access, graph edges, domain terms, and chunks.
+2. Ask the LLM to create class-level capability summaries.
+3. Group class capabilities into business capabilities and workflows.
+4. Generate opportunity candidates across an expanded opportunity taxonomy.
+5. Validate candidates with evidence, missing-data analysis, and confidence scoring.
+6. Generate repo-level and workspace-level LLM discovery reports.
+
+Use class-level summaries as the first unit of LLM analysis. Method-level LLM summaries should be generated only on demand for high-complexity, ambiguous, or candidate-critical classes.
+
+The LLM Discovery Workflow should produce structured JSON facts and store them separately from deterministic facts. LLM outputs may enrich graph/search/ranking, but should not overwrite parsed source facts.
+
+Candidate taxonomy should include:
+
+- `modernization_opportunity`
+- `automation_opportunity`
+- `ai_use_case`
+- `new_business_use_case`
+- `operational_improvement`
+- `customer_experience_improvement`
+- `revenue_growth_opportunity`
+- `cost_reduction_opportunity`
+- `risk_compliance_improvement`
+- `data_product_opportunity`
+- `platform_api_opportunity`
+- `process_simplification`
+- `decision_intelligence_opportunity`
+- `personalization_opportunity`
+- `fraud_risk_detection`
+- `employee_copilot_opportunity`
+- `analytics_reporting_opportunity`
+- `integration_consolidation`
+- `technical_debt_reduction`
+- `resilience_reliability_improvement`
+
+This workflow should be tracked in a separate task plan: [llm_discovery_tasks.md](llm_discovery_tasks.md).
 
 ## 13. Reporting
 
